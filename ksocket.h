@@ -13,7 +13,7 @@
 #define HEADER_SIZE 4
 #define PACKET_SIZE (MSSG_SIZE+HEADER_SIZE)
 
-#define MAX_CONC_SOSCKETS 2
+#define MAX_CONC_SOSCKETS 10
 
 #define T 5
 
@@ -109,6 +109,7 @@ struct ktp_header {
 // Helper Functions
 void initialise_shm_ele(struct ktp_sockaddr* ele);
 struct ktp_sockaddr* open_ktp_arr();
+int* open_udp_arr();
 char* pkt_create(struct ktp_header header, char* mssg);
 void extract_pkt(char* packet, struct ktp_header *header, char* mssg);
 

@@ -10,9 +10,14 @@
 #include <unistd.h>
 #include <errno.h>
 
+
+
 int shmid, shmkey;
+int shmid_udp_sock, shmkey_udp_sock;
 
 struct ktp_sockaddr *ktp_arr;
+
+int *udp_sock_fds;
 
 #define P 0.2  // Packet drop probability
 
@@ -246,19 +251,18 @@ void *S(void *arg) {
 void custom_exit(int status){
 
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
-        if(ktp_arr[i].udp_fd > 0){
-            
-            close(ktp_arr[i].udp_fd);
+    
+        close(udp_sock_fds[i]);
 
-        }
-
-        ktp_arr[i].udp_fd = -1;
     }
 
     shmdt(ktp_arr);
     shmctl(shmid, IPC_RMID, NULL);
-    exit(status);
 
+    shmdt(udp_sock_fds);
+    shmctl(shmid_udp_sock, IPC_RMID, NULL);
+    
+    exit(status);
 }
 
 void intialise_array(){
@@ -275,29 +279,35 @@ void sigint_handler(int signum) {
     custom_exit(0);
 }
 
+void set_udp_sock_fds(){
+    for(int i=0; i<MAX_CONC_SOSCKETS; i++){
+        udp_sock_fds[i] = socket(AF_INET, SOCK_DGRAM, 0);
+    }
+}
+
+
 int main(){
 
     signal(SIGINT, sigint_handler);
     pthread_t send_thread, recv_thread;
 
+    // Shared memory of KTP ARRAY of KTP SOCKET STRUCTURES
     shmkey = ftok("/", 'A');
     shmid = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(struct ktp_sockaddr), 0777|IPC_CREAT);
-
     ktp_arr = (struct ktp_sockaddr*) shmat(shmid, NULL, 0);
+    
+    // Shared Memory for the UDP socket file descriptors
+    shmkey_udp_sock = ftok("/", 'B');
+    shmid_udp_sock = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(int), 0777|IPC_CREAT);
+    udp_sock_fds = (int *) shmat(shmid_udp_sock, NULL, 0);
+
+    
     if (ktp_arr == (void *) -1) {
         perror("shmat failed");
         exit(1);
     }
 
     intialise_array();
-
-    if(fork() == 0){
-        execlp("./user1", "./user1", NULL);
-    }
-
-    if(fork() == 0){
-        execlp("./user2", "./user2", NULL);
-    }
     
     if(pthread_create(&recv_thread, NULL, R, NULL)){
         printf("Error creating thread R\n");
@@ -308,6 +318,8 @@ int main(){
         printf("Error creating thread S\n");
         custom_exit(1);
     }
+
+    // main thread checks 
 
     pthread_join(recv_thread, NULL);
     pthread_join(send_thread, NULL);

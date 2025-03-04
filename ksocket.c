@@ -138,6 +138,14 @@ struct ktp_sockaddr* open_ktp_arr(){
     return ktp_arr;
 }
 
+int* open_udp_arr(){
+    int shmkey = ftok("/", 'B');
+    int shmid = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(int), 0777);
+    int* udp_arr = (int*)shmat(shmid, 0, 0);
+
+    return udp_arr;
+}
+
 char* pkt_create(struct ktp_header header, char* mssg){
     size_t mssglen = strlen(mssg);
     size_t total_packet_size = sizeof(header) + strlen(mssg);
@@ -175,13 +183,14 @@ int k_socket(int domain, int type, int protocol){
     
     // access SHM
     struct ktp_sockaddr* ktp_arr = open_ktp_arr();
+    int * udp_arr = open_udp_arr();
 
     // check if space available for new socket
     int flag = 0;
     int i = 0;
     for(i=0; i<MAX_CONC_SOSCKETS; i++){
 
-        if(ktp_arr[i].udp_fd == -1){
+        if(ktp_arr[i].process_id == -1){
             // free socket available
             flag = 1;
 
@@ -189,7 +198,7 @@ int k_socket(int domain, int type, int protocol){
             ktp_arr[i].process_id = getpid();
 
             // setting udp socket num in the SHM
-            ktp_arr[i].udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+            ktp_arr[i].udp_fd = udp_arr[i];
 
             // setting seq_num
             ktp_arr[i].last_ack_sent = -1;
@@ -231,6 +240,7 @@ int k_socket(int domain, int type, int protocol){
     }
 
     shmdt(ktp_arr);
+    shmdt(udp_arr);
 
     if(!flag) return -1;
     return i;
@@ -357,7 +367,6 @@ int k_close(int socket){
     // SHM access
     struct ktp_sockaddr* ktp_arr = open_ktp_arr();
 
-    close(ktp_arr[socket].udp_fd);
 
     initialise_shm_ele(&ktp_arr[socket]);
 
