@@ -13,6 +13,14 @@
 #define HEADER_SIZE 4
 #define PACKET_SIZE (MSSG_SIZE+HEADER_SIZE)
 
+/* 
+    Macros for bind_status used 
+    in ktp_arr
+*/
+#define UNBINDED -1
+#define AWAIT_BIND -2
+#define BINDED -3
+
 #define MAX_CONC_SOSCKETS 10
 
 #define T 5
@@ -97,6 +105,8 @@ struct ktp_sockaddr{
     struct timeval last_send_time;
     int nospace_flag;
     uint8_t last_ack_sent;
+
+    int bind_status;
 };
 
 struct ktp_header {

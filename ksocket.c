@@ -203,6 +203,9 @@ int k_socket(int domain, int type, int protocol){
             // setting seq_num
             ktp_arr[i].last_ack_sent = -1;
 
+            // setting bind_status
+            ktp_arr[i].bind_status = UNBINDED;
+
             // init send and recv buffers
             initCircularArray(&ktp_arr[i].send_buf);
             initCircularArray(&ktp_arr[i].recv_buf);
@@ -261,18 +264,8 @@ int k_bind(int sock_fd, char *src_ip, int src_port, char *des_ip, int des_port){
     strcpy(sock->des_ip, des_ip);
     sock->des_port = des_port;
     
-    // call UDP bind()
-    struct sockaddr_in servaddr;
-    memset(&servaddr, 0, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(src_port);
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    if(bind(sock->udp_fd, (struct sockaddr*)&servaddr, sizeof(servaddr))){
-        shmdt(ktp_arr);
-        setCustomError(EBIND);
-        return -1;
-    }
+    // bind_status is set to AWAIT_BIND
+    sock->bind_status = AWAIT_BIND;
 
 
     shmdt(ktp_arr);
@@ -343,6 +336,7 @@ void initialise_shm_ele(struct ktp_sockaddr* ele){
     ele->last_ack_sent = -1;
 
     // ele->next_expected_seq = -1;
+    ele->bind_status = UNBINDED;
 }
 
 int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, struct sockaddr *restrict address, socklen_t *restrict address_len){

@@ -319,7 +319,35 @@ int main(){
         custom_exit(1);
     }
 
-    // main thread checks 
+    // main thread checks for outstanding k_bind calls
+    // and binds them
+    while(1){
+
+        for(int i=0; i<MAX_CONC_SOSCKETS; i++){
+            if(ktp_arr[i].process_id < 0){
+                continue;
+            }
+
+            struct ktp_sockaddr* sock = &ktp_arr[i];
+
+            if(ktp_arr[i].bind_status == AWAIT_BIND){
+
+                struct sockaddr_in servaddr;
+                memset(&servaddr, 0, sizeof(servaddr));
+                servaddr.sin_family = AF_INET;
+                servaddr.sin_port = htons(sock->src_port);
+                servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+                if(bind(sock->udp_fd, (struct sockaddr*)&servaddr, sizeof(servaddr))){
+                    setCustomError(EBIND);
+                }
+                else{
+                    ktp_arr[i].bind_status = BINDED;
+                }
+            }
+        }
+    }
+
 
     pthread_join(recv_thread, NULL);
     pthread_join(send_thread, NULL);
