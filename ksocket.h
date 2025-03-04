@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <stdint.h>
 #include <sys/time.h>
+#include <semaphore.h>
 
 
 #define WINDOW_SIZE 10
@@ -13,10 +14,7 @@
 #define HEADER_SIZE 4
 #define PACKET_SIZE (MSSG_SIZE+HEADER_SIZE)
 
-/* 
-    Macros for bind_status used 
-    in ktp_arr
-*/
+/* Macros for bind_status used in ktp_arr */
 #define UNBINDED -1
 #define AWAIT_BIND -2
 #define BINDED -3
@@ -123,6 +121,10 @@ int* open_udp_arr();
 char* pkt_create(struct ktp_header header, char* mssg);
 void extract_pkt(char* packet, struct ktp_header *header, char* mssg);
 
+// Semaphore Functions
+#define SEM_NAME "/mysemaphore"
+sem_t *sem;
+void init_semaphore(sem_t *sem);
 
 // K_SOCKET Functions
 int k_socket(int domain, int type, int protocol);

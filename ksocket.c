@@ -194,6 +194,10 @@ int k_socket(int domain, int type, int protocol){
             // free socket available
             flag = 1;
 
+            // set semaphore
+            init_semaphore(sem);
+            sem_wait(sem);
+
             // set process id
             ktp_arr[i].process_id = getpid();
 
@@ -233,6 +237,10 @@ int k_socket(int domain, int type, int protocol){
             if(ktp_arr[i].udp_fd < 0){
                 setCustomError(ESOCKCREAT);
             }
+
+            // signal semaphore
+            sem_post(sem);
+            sem_close(sem);
 
             break;
         }
@@ -285,6 +293,10 @@ int k_sendto(int socket, const void *buffer, size_t length, int flags, const str
     // access SHM
     struct ktp_sockaddr* ktp_arr = open_ktp_arr();
 
+    // open semaphore
+    init_semaphore(sem);
+    sem_wait(sem);
+
     // acces KTP socket
     struct ktp_sockaddr *sock = &ktp_arr[socket];
 
@@ -292,6 +304,9 @@ int k_sendto(int socket, const void *buffer, size_t length, int flags, const str
     if(strcmp(sock->des_ip, des_ip) || sock->des_port != des_port){
         setCustomError(ENOTBOUND);
         shmdt(ktp_arr);
+
+        sem_post(sem);
+        sem_close(sem);
         return -1;
     }
 
@@ -308,11 +323,16 @@ int k_sendto(int socket, const void *buffer, size_t length, int flags, const str
         free(packet);
         shmdt(ktp_arr);
         setCustomError(ENOSPACE);
+
+        sem_post(sem);
+        sem_close(sem);
         return -1;
     }
 
 
     shmdt(ktp_arr);
+    sem_post(sem);
+    sem_close(sem);
     
     return strlen(((char*)buffer));
 }
@@ -344,6 +364,9 @@ int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, stru
     // SHM access
     struct ktp_sockaddr* ktp_arr = open_ktp_arr();
 
+    init_semaphore(sem);
+    sem_wait(sem);
+
     if(dequeue(&ktp_arr[socket].recv_buf, (char *)buffer) == 0){
 
         setCustomError(ENOMESSAGE);
@@ -353,6 +376,8 @@ int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, stru
     }
 
     shmdt(ktp_arr);
+    sem_post(sem);
+    sem_close(sem);
     
     return strlen(buffer);
 }
@@ -366,4 +391,8 @@ int k_close(int socket){
 
     shmdt(ktp_arr);
     return 0;
+}
+
+void init_semaphore(sem_t *sem){
+    sem = sem_open(SEM_NAME, 0);
 }

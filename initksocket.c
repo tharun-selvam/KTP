@@ -9,15 +9,17 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <semaphore.h>
 
-
-
+// Shared Memory
 int shmid, shmkey;
 int shmid_udp_sock, shmkey_udp_sock;
 
 struct ktp_sockaddr *ktp_arr;
-
 int *udp_sock_fds;
+
+// Semaphores
+sem_t *sem;
 
 #define P 0.2  // Packet drop probability
 
@@ -65,11 +67,16 @@ void *R(void* arg) {
  
         // Set up select() for all active UDP sockets
         for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
+            
+            sem_wait(sem);
+
             if (ktp_arr[i].udp_fd < 0)
                 continue;
             FD_SET(ktp_arr[i].udp_fd, &read_fds);
             if (ktp_arr[i].udp_fd > maxfd)
                 maxfd = ktp_arr[i].udp_fd;
+
+            sem_post(sem);
         }
         
         if (maxfd < 0)
@@ -83,17 +90,19 @@ void *R(void* arg) {
         
         if (ready > 0) {
             for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
+
+                
                 if (ktp_arr[i].udp_fd < 0 || !FD_ISSET(ktp_arr[i].udp_fd, &read_fds))
-                    continue;
+                continue;
                 
                 char packet[PACKET_SIZE];
                 struct sockaddr_in sender_addr;
                 socklen_t addr_len = sizeof(sender_addr);
                 
                 ssize_t received = recvfrom(ktp_arr[i].udp_fd, packet, sizeof(packet), 0,
-                                            (struct sockaddr*)&sender_addr, &addr_len);
+                (struct sockaddr*)&sender_addr, &addr_len);
                 if (received <= 0)
-                    continue;
+                continue;
                 
                 // Simulate packet loss
                 if (dropMessage(P)) {
@@ -110,12 +119,16 @@ void *R(void* arg) {
                     // Check if the ACK is for the outstanding packet.
                     // We assume swnd.base holds the sequence number of the packet currently in flight.
                     if (pkt_header.ack_num == ktp_arr[i].swnd.base) {
+                        
+                        sem_wait(sem);
                         // Valid in-order ACK received:
                         // Clear the outstanding packet (set swnd.base to 0) and update next sequence.
                         ktp_arr[i].swnd.base = 0;
                         // Update next sequence number: if ack is 255 then next becomes 1.
                         ktp_arr[i].swnd.next_seq_num = (pkt_header.ack_num % 255) + 1;
                         ktp_arr[i].last_ack_sent = pkt_header.ack_num;
+
+                        sem_post(sem);
                     } else {
                         // Out-of-order or duplicate ACK: ignore.
                     }
@@ -124,21 +137,25 @@ void *R(void* arg) {
                     // Accept the packet only if its sequence number matches the expected sequence.
                     if (pkt_header.seq_num == ktp_arr[i].rwnd.next_expected_seq) {
                         // Enqueue the message in the receiver buffer.
+                        sem_wait(sem);
                         if (enqueue(&ktp_arr[i].recv_buf, message, pkt_header.seq_num)) {
                             // Send ACK for this packet.
                             send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], pkt_header.seq_num);
                             // Update expected sequence number (wrap from 255 to 1)
                             ktp_arr[i].rwnd.next_expected_seq = (pkt_header.seq_num % 255) + 1;
                         }
+                        sem_post(sem);
                     } else {
                         // Out-of-order data packet: drop it.
                         // send an ACK for the last in-order packet,
+                        sem_wait(sem);
                         uint8_t last_in_order;
                         if (ktp_arr[i].rwnd.next_expected_seq == 1)
                             last_in_order = 255;
                         else
                             last_in_order = ktp_arr[i].rwnd.next_expected_seq - 1;
                         send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], last_in_order);
+                        sem_post(sem);
                     }
                 }
             }
@@ -261,6 +278,8 @@ void custom_exit(int status){
 
     shmdt(udp_sock_fds);
     shmctl(shmid_udp_sock, IPC_RMID, NULL);
+
+    sem_close(sem);
     
     exit(status);
 }
@@ -268,7 +287,9 @@ void custom_exit(int status){
 void intialise_array(){
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
         
+        sem_wait(sem);
         initialise_shm_ele(&ktp_arr[i]);
+        sem_post(sem);
 
     }
     return;
@@ -281,12 +302,18 @@ void sigint_handler(int signum) {
 
 void set_udp_sock_fds(){
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
+
+        sem_wait(sem);
         udp_sock_fds[i] = socket(AF_INET, SOCK_DGRAM, 0);
+        sem_post(sem);
     }
 }
 
 
 int main(){
+
+    // create semaphore
+    sem = sem_open(SEM_NAME, IPC_CREAT | IPC_EXCL, 0644, 1);
 
     signal(SIGINT, sigint_handler);
     pthread_t send_thread, recv_thread;
@@ -324,6 +351,9 @@ int main(){
     while(1){
 
         for(int i=0; i<MAX_CONC_SOSCKETS; i++){
+            
+            sem_wait(sem);
+
             if(ktp_arr[i].process_id < 0){
                 continue;
             }
@@ -345,7 +375,10 @@ int main(){
                     ktp_arr[i].bind_status = BINDED;
                 }
             }
+
+            sem_post(sem);
         }
+
     }
 
 
