@@ -13,7 +13,7 @@ void initCircularArray(struct data_buffer *ca) {
     ca->head = 0;
     ca->tail = 0;
     ca->count = 0;
-    memset(ca->seq_nums, 0, WINDOW_SIZE * sizeof(uint8_t));
+
 }
 
 int isFull(struct data_buffer *ca) {
@@ -24,12 +24,11 @@ int isEmpty(struct data_buffer *ca) {
     return ca->count == 0;
 }
 
-int enqueue(struct data_buffer *ca, char* mssg, uint8_t seq_num) {
+int enqueue(struct data_buffer *ca, char* mssg) {
     if (isFull(ca)) {
         return 0;
     }
     strcpy(ca->_buf[ca->tail], mssg);
-    ca->seq_nums[ca->tail] = seq_num;  // Store sequence number
     ca->tail = (ca->tail + 1) % WINDOW_SIZE;
     ca->count++;
     return 1;
@@ -45,12 +44,6 @@ int dequeue(struct data_buffer *ca, char *mssg) {
     ca->head = (ca->head + 1) % WINDOW_SIZE;
     ca->count--;
     return 1;
-}
-
-uint8_t get_seq_num(struct data_buffer *ca, int index) {
-    if (index >= ca->count) return 0;
-    int actual_index = (ca->head + index) % WINDOW_SIZE;
-    return ca->seq_nums[actual_index];
 }
 
 void print_buff(struct data_buffer *ca){
@@ -333,17 +326,9 @@ int k_sendto(int socket, const void *buffer, size_t length, int flags, const str
         return -1;
     }
 
-    // Create packet with sequence number
-    struct ktp_header header;
-    header.seq_num = sock->swnd.next_seq_num++;  // Increment sequence number
-    header.is_ack = 0;
-    header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;
-
-    char *packet = pkt_create(header, (char *)buffer);
 
     // Add to send buffer with sequence number
-    if(enqueue(&sock->send_buf, (char *)buffer, header.seq_num) == 0) {
-        free(packet);
+    if(enqueue(&sock->send_buf, (char *)buffer) == 0) {
         shmdt(ktp_arr);
         setCustomError(ENOSPACE);
 

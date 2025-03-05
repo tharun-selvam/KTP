@@ -51,20 +51,16 @@ CustomErrorCode getCustomError(void);
 
 struct data_buffer {
     char _buf[WINDOW_SIZE][MSSG_SIZE+1];
-    uint8_t seq_nums[WINDOW_SIZE];  // Array to store sequence numbers
     int head;
     int tail;
     int count;
 };
 
-uint8_t get_seq_num(struct data_buffer *ca, int index);
-
-
 // QUEUE Functions
 void initCircularArray(struct data_buffer *ca);
 int isFull(struct data_buffer *ca);
 int isEmpty(struct data_buffer *ca);
-int enqueue(struct data_buffer *ca, char* mssg, uint8_t seq_num);
+int enqueue(struct data_buffer *ca, char* mssg);
 int dequeue(struct data_buffer *ca, char *mssg);
 void print_buff(struct data_buffer *ca);
 void application_print(int ktp_socket);

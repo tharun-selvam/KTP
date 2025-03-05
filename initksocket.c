@@ -148,7 +148,7 @@ void *R(void* arg) {
                         // Enqueue the message in the receiver buffer.
                         printf("hereAck\n");
                         sem_wait(sem);
-                        if (enqueue(&ktp_arr[i].recv_buf, message, pkt_header.seq_num)) {
+                        if (enqueue(&ktp_arr[i].recv_buf, message)) {
                             // Send ACK for this packet.
                             send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], pkt_header.seq_num);
                             // Update expected sequence number (wrap from 255 to 1)
