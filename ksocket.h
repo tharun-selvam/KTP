@@ -107,12 +107,14 @@ struct ktp_sockaddr{
     int bind_status;
 };
 
+#pragma pack(1)
 struct ktp_header {
     uint8_t seq_num;        // Sequence number
     uint8_t ack_num;        // Acknowledgment number
     uint8_t is_ack;         // Flag to indicate if packet is an ACK
     uint8_t rwnd_size;      // Receiver's window size
 };
+#pragma pack()
 
 // Helper Functions
 void initialise_shm_ele(struct ktp_sockaddr* ele);
@@ -120,6 +122,7 @@ struct ktp_sockaddr* open_ktp_arr();
 int* open_udp_arr();
 char* pkt_create(struct ktp_header header, char* mssg);
 void extract_pkt(char* packet, struct ktp_header *header, char* mssg);
+void print_header(struct ktp_header *header);
 
 // Semaphore Functions
 #define SEM_NAME "/mysemaphore"

@@ -68,15 +68,12 @@ void *R(void* arg) {
         // Set up select() for all active UDP sockets
         for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
             
-            sem_wait(sem);
-
             if (ktp_arr[i].udp_fd < 0)
                 continue;
             FD_SET(ktp_arr[i].udp_fd, &read_fds);
             if (ktp_arr[i].udp_fd > maxfd)
                 maxfd = ktp_arr[i].udp_fd;
 
-            sem_post(sem);
         }
         
         if (maxfd < 0)
@@ -89,11 +86,15 @@ void *R(void* arg) {
         int ready = select(maxfd + 1, &read_fds, NULL, NULL, &timeout);
         
         if (ready > 0) {
+            printf("--- select received something!\n");
+            
             for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
-
+                
                 
                 if (ktp_arr[i].udp_fd < 0 || !FD_ISSET(ktp_arr[i].udp_fd, &read_fds))
                 continue;
+                
+                printf("------ select received something!\n");
                 
                 char packet[PACKET_SIZE];
                 struct sockaddr_in sender_addr;
@@ -101,18 +102,25 @@ void *R(void* arg) {
                 
                 ssize_t received = recvfrom(ktp_arr[i].udp_fd, packet, sizeof(packet), 0,
                 (struct sockaddr*)&sender_addr, &addr_len);
+                printf("Packet, Received: %d |%s|\n", (int)received, packet);
                 if (received <= 0)
-                continue;
-                
-                // Simulate packet loss
-                if (dropMessage(P)) {
-                    continue; // Drop packet
+                {
+                    printf("PID: %d Nothing received\n", ktp_arr[i].process_id);
+                    continue;
                 }
+                
+                // // Simulate packet loss
+                // if (dropMessage(P)) {
+                //     continue; // Drop packet
+                // }
                 
                 // Extract header and message
                 struct ktp_header pkt_header;
                 char message[MSSG_SIZE + 1];
                 extract_pkt(packet, &pkt_header, message);
+
+                printf("Message recvd: %s\n", message);
+                print_header(&pkt_header);
                 
                 if (pkt_header.is_ack) {
                     // ACK message handling
@@ -120,6 +128,7 @@ void *R(void* arg) {
                     // We assume swnd.base holds the sequence number of the packet currently in flight.
                     if (pkt_header.ack_num == ktp_arr[i].swnd.base) {
                         
+                        printf("hereAck\n");
                         sem_wait(sem);
                         // Valid in-order ACK received:
                         // Clear the outstanding packet (set swnd.base to 0) and update next sequence.
@@ -137,6 +146,7 @@ void *R(void* arg) {
                     // Accept the packet only if its sequence number matches the expected sequence.
                     if (pkt_header.seq_num == ktp_arr[i].rwnd.next_expected_seq) {
                         // Enqueue the message in the receiver buffer.
+                        printf("hereAck\n");
                         sem_wait(sem);
                         if (enqueue(&ktp_arr[i].recv_buf, message, pkt_header.seq_num)) {
                             // Send ACK for this packet.
@@ -148,6 +158,7 @@ void *R(void* arg) {
                     } else {
                         // Out-of-order data packet: drop it.
                         // send an ACK for the last in-order packet,
+                        printf("hereAck\n");
                         sem_wait(sem);
                         uint8_t last_in_order;
                         if (ktp_arr[i].rwnd.next_expected_seq == 1)
@@ -159,6 +170,8 @@ void *R(void* arg) {
                     }
                 }
             }
+        }else{
+            printf("select did not receive anything!\n");
         }
         // On timeout, nothing specific to do as sender is waiting for an ACK.
     }
@@ -236,18 +249,21 @@ void *S(void *arg) {
                     struct sockaddr_in dest_addr;
                     memset(&dest_addr, 0, sizeof(dest_addr));
                     dest_addr.sin_family = AF_INET;
+                    printf("Port: %d IP: %s\n", sock->des_port, sock->des_ip);
                     dest_addr.sin_port = htons(sock->des_port);
                     inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
                     
-                    printf("here\n");
+                    printf("here1\n");
+                    printf("Message sent: |%s|\n", message);
                     // Send the packet.
                     if(sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
-                           (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0){
+                           (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0 ){
 
                         printf("%d %s\n", ktp_arr[i].udp_fd, strerror(errno));
 
                     }
-                    
+                    printf("Packet sent\n");
+
                     // Mark this packet as outstanding.
                     sock->swnd.base = header.seq_num;
                     // Update next sequence number with wrap-around (1-255).
@@ -287,7 +303,9 @@ void custom_exit(int status){
 void intialise_array(){
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
         
+        printf("here2\n");
         sem_wait(sem);
+        printf("here3\n");
         initialise_shm_ele(&ktp_arr[i]);
         sem_post(sem);
 
@@ -303,6 +321,7 @@ void sigint_handler(int signum) {
 void set_udp_sock_fds(){
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
 
+        printf("hereUdp\n");
         sem_wait(sem);
         udp_sock_fds[i] = socket(AF_INET, SOCK_DGRAM, 0);
         sem_post(sem);
@@ -313,20 +332,53 @@ void set_udp_sock_fds(){
 int main(){
 
     // create semaphore
-    sem = sem_open(SEM_NAME, IPC_CREAT | IPC_EXCL, 0644, 1);
+    printf("here\n");
+    sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0644, 1);
 
     signal(SIGINT, sigint_handler);
     pthread_t send_thread, recv_thread;
 
-    // Shared memory of KTP ARRAY of KTP SOCKET STRUCTURES
+    // Shared memory for KTP array (KTP socket structures)
     shmkey = ftok("/", 'A');
-    shmid = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(struct ktp_sockaddr), 0777|IPC_CREAT);
-    ktp_arr = (struct ktp_sockaddr*) shmat(shmid, NULL, 0);
-    
-    // Shared Memory for the UDP socket file descriptors
+    if (shmkey == -1) {
+        perror("ftok failed for KTP array");
+        exit(EXIT_FAILURE);
+    }
+
+    shmid = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(struct ktp_sockaddr), 0777 | IPC_CREAT);
+    if (shmid == -1) {
+        perror("shmget failed for KTP array");
+        exit(EXIT_FAILURE);
+    }
+
+    ktp_arr = (struct ktp_sockaddr *)shmat(shmid, NULL, 0);
+    if (ktp_arr == (void *)-1) {
+        perror("shmat failed for KTP array");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Shared memory for KTP array allocated and attached successfully.\n");
+
+    // Shared Memory for UDP socket file descriptors
     shmkey_udp_sock = ftok("/", 'B');
-    shmid_udp_sock = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(int), 0777|IPC_CREAT);
-    udp_sock_fds = (int *) shmat(shmid_udp_sock, NULL, 0);
+    if (shmkey_udp_sock == -1) {
+        perror("ftok failed for UDP socket descriptors");
+        exit(EXIT_FAILURE);
+    }
+
+    shmid_udp_sock = shmget(shmkey_udp_sock, MAX_CONC_SOSCKETS * sizeof(int), 0777 | IPC_CREAT);
+    if (shmid_udp_sock == -1) {
+        perror("shmget failed for UDP socket descriptors");
+        exit(EXIT_FAILURE);
+    }
+
+    udp_sock_fds = (int *)shmat(shmid_udp_sock, NULL, 0);
+    if (udp_sock_fds == (void *)-1) {
+        perror("shmat failed for UDP socket descriptors");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Shared memory for UDP socket descriptors allocated and attached successfully.\n");
 
     
     if (ktp_arr == (void *) -1) {
@@ -335,6 +387,15 @@ int main(){
     }
 
     intialise_array();
+
+    sem_wait(sem);
+    for(int i=0; i<MAX_CONC_SOSCKETS; i++){
+        printf("%d ", ktp_arr[i].process_id);
+    }
+    sem_post(sem);
+    printf("\n");
+
+    set_udp_sock_fds();
     
     if(pthread_create(&recv_thread, NULL, R, NULL)){
         printf("Error creating thread R\n");
@@ -373,6 +434,7 @@ int main(){
                 }
                 else{
                     ktp_arr[i].bind_status = BINDED;
+                    printf("Process %d binded\n", ktp_arr[i].process_id);
                 }
             }
 

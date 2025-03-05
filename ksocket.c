@@ -134,6 +134,10 @@ struct ktp_sockaddr* open_ktp_arr(){
     int shmkey = ftok("/", 'A');
     int shmid = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(struct ktp_sockaddr), 0777);
     struct ktp_sockaddr* ktp_arr= (struct ktp_sockaddr*)shmat(shmid, 0, 0);
+    if (ktp_arr == (void*)-1) {
+        perror("shmat failed");
+        exit(EXIT_FAILURE);
+    }
 
     return ktp_arr;
 }
@@ -142,16 +146,21 @@ int* open_udp_arr(){
     int shmkey = ftok("/", 'B');
     int shmid = shmget(shmkey, MAX_CONC_SOSCKETS * sizeof(int), 0777);
     int* udp_arr = (int*)shmat(shmid, 0, 0);
-
+    if (udp_arr == (void*)-1) {
+        perror("shmat failed");
+        exit(EXIT_FAILURE);
+    }
     return udp_arr;
 }
 
 char* pkt_create(struct ktp_header header, char* mssg){
     size_t mssglen = strlen(mssg);
-    size_t total_packet_size = sizeof(header) + strlen(mssg);
+    size_t total_packet_size = sizeof(header) + strlen(mssg) + 1;
     char *packet = (char *)malloc(total_packet_size);
     memcpy(packet, &header, sizeof(header));
     memcpy(packet + sizeof(header), mssg, mssglen);
+
+    printf("Packet inside: |%s|\n", packet + sizeof(header));
 
     return packet;
 }
@@ -161,6 +170,16 @@ void extract_pkt(char* packet, struct ktp_header *header, char* mssg){
     memcpy(header, packet, sizeof(struct ktp_header));
     memcpy(mssg, packet + sizeof(struct ktp_header), MSSG_SIZE);
     mssg[MSSG_SIZE] = '\0';
+}
+
+void print_header(struct ktp_header *header){
+    printf("--- Header\n");
+    printf("\tIs Ack: %d\n", header->is_ack);
+    printf("\tAck Num: %d\n", header->ack_num);
+    printf("\tSeq Num: %d\n", header->seq_num);
+    printf("\trwnd size: %d\n", header->rwnd_size);
+
+    return;
 }
 
 
@@ -189,10 +208,14 @@ int k_socket(int domain, int type, int protocol){
     int flag = 0;
     int i = 0;
     for(i=0; i<MAX_CONC_SOSCKETS; i++){
+        
+        printf("%d ", ktp_arr[i].process_id);
 
-        if(ktp_arr[i].process_id == -1){
+        if(ktp_arr[i].process_id < 0){
             // free socket available
             flag = 1;
+
+            printf("here\n");
 
             // set semaphore
             init_semaphore(sem);
@@ -274,7 +297,7 @@ int k_bind(int sock_fd, char *src_ip, int src_port, char *des_ip, int des_port){
     
     // bind_status is set to AWAIT_BIND
     sock->bind_status = AWAIT_BIND;
-
+    printf("Process %d asked to bind\n", getpid());
 
     shmdt(ktp_arr);
     return 0;
@@ -341,6 +364,7 @@ void initialise_shm_ele(struct ktp_sockaddr* ele){
     ele->udp_fd = -1;
     ele->last_ack_sent = -1;
 
+    printf("here1\n");
     ele->process_id = -1;
     ele->udp_fd = -1;
     
@@ -366,6 +390,14 @@ int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, stru
 
     init_semaphore(sem);
     sem_wait(sem);
+
+    int flag = 1;
+    while(isEmpty(&ktp_arr[socket].recv_buf)){
+        if(flag){
+            flag = 0;
+            printf("Waiting for a message in the receive buffer\n");
+        }
+    };
 
     if(dequeue(&ktp_arr[socket].recv_buf, (char *)buffer) == 0){
 

@@ -6,6 +6,7 @@
 #include "ksocket.h"
 
 int main() {
+    printf("PID: %d\n", getpid());
     int sock = k_socket(AF_INET, SOCK_KTP, 0);
     if (sock < 0) {
         printf("Error creating KTP socket\n");

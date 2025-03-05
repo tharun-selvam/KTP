@@ -9,6 +9,7 @@ int main() {
     int sock = k_socket(AF_INET, SOCK_KTP, 0);
     if (sock < 0) {
         printf("Error creating KTP socket\n");
+        printf("%s", getCustomErrorMessage(global_err_var));
         exit(1);
     }
     
