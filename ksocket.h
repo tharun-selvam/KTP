@@ -8,7 +8,8 @@
 #include <semaphore.h>
 
 
-#define WINDOW_SIZE 10
+#define WINDOW_SIZE 1
+#define BUFFER_SIZE 10
 #define MSSG_SIZE 512
 #define SOCK_KTP 12345
 #define HEADER_SIZE 4

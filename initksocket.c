@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <semaphore.h>
+#include <sys/sem.h>
 
 // Shared Memory
 int shmid, shmkey;
@@ -21,7 +22,10 @@ int *udp_sock_fds;
 // Semaphores
 sem_t *sem;
 
-#define P 0.2  // Packet drop probability
+#define P(s) semop(s, &pop, 1)
+#define V(s) semop(s, &vop, 1)
+
+#define P1 0.2  // Packet drop probability
 
 int dropMessage(float p) {
     float random = (float)rand() / RAND_MAX;
@@ -110,7 +114,7 @@ void *R(void* arg) {
                 }
                 
                 // // Simulate packet loss
-                // if (dropMessage(P)) {
+                // if (dropMessage(P1)) {
                 //     continue; // Drop packet
                 // }
                 
@@ -331,7 +335,7 @@ void set_udp_sock_fds(){
 
 int main(){
 
-    // create semaphore
+    // create semaphore to access the shared mem of different processese
     printf("here\n");
     sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0644, 1);
 
@@ -386,15 +390,10 @@ int main(){
         exit(1);
     }
 
+    // initialise KTP array
     intialise_array();
 
-    sem_wait(sem);
-    for(int i=0; i<MAX_CONC_SOSCKETS; i++){
-        printf("%d ", ktp_arr[i].process_id);
-    }
-    sem_post(sem);
-    printf("\n");
-
+    // initialise UDP sockets array
     set_udp_sock_fds();
     
     if(pthread_create(&recv_thread, NULL, R, NULL)){
@@ -407,7 +406,7 @@ int main(){
         custom_exit(1);
     }
 
-    // main thread checks for outstanding k_bind calls
+    // main funciton now checks for outstanding k_bind calls
     // and binds them
     while(1){
 

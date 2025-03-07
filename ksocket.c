@@ -17,7 +17,7 @@ void initCircularArray(struct data_buffer *ca) {
 }
 
 int isFull(struct data_buffer *ca) {
-    return ca->count == WINDOW_SIZE;
+    return ca->count == BUFFER_SIZE;
 }
 
 int isEmpty(struct data_buffer *ca) {
@@ -29,7 +29,7 @@ int enqueue(struct data_buffer *ca, char* mssg) {
         return 0;
     }
     strcpy(ca->_buf[ca->tail], mssg);
-    ca->tail = (ca->tail + 1) % WINDOW_SIZE;
+    ca->tail = (ca->tail + 1) % BUFFER_SIZE;
     ca->count++;
     return 1;
 }
@@ -41,7 +41,7 @@ int dequeue(struct data_buffer *ca, char *mssg) {
     if (mssg != NULL) {  // Allow NULL for just removing entry
         strcpy(mssg, ca->_buf[ca->head]);
     }
-    ca->head = (ca->head + 1) % WINDOW_SIZE;
+    ca->head = (ca->head + 1) % BUFFER_SIZE;
     ca->count--;
     return 1;
 }
@@ -58,7 +58,7 @@ void print_buff(struct data_buffer *ca){
             printf("Mssg %d:\n%s\n", i, ca->_buf[curr]);
 
             i++;
-            curr = (curr + 1)%WINDOW_SIZE;
+            curr = (curr + 1)%BUFFER_SIZE;
         }
     }
 }
