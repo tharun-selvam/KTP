@@ -33,6 +33,8 @@ int main() {
         "Message 3: Goodbye!"
     };
     
+    application_print(sock);
+    
     for (int i = 0; i < 3; i++) {
         int sent = k_sendto(sock, messages[i], strlen(messages[i]) + 1, 0,
                              (struct sockaddr *)&dest_addr, sizeof(dest_addr));
@@ -40,11 +42,16 @@ int main() {
             printf("Error sending message %d\n", i + 1);
         } else {
             printf("Sent: %s\n", messages[i]);
-        }
+            // application_print(sock);
 
-        application_print(sock);
+        }
         // Wait a bit to allow the ACK and transmission logic to complete
         sleep(2);
+
+        if(i == 2){
+            char c;
+            scanf(" %c", &c);
+        }
     }
     
     k_close(sock);

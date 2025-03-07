@@ -51,7 +51,7 @@ void setCustomError(CustomErrorCode error);
 CustomErrorCode getCustomError(void);
 
 struct data_buffer {
-    char _buf[WINDOW_SIZE][MSSG_SIZE+1];
+    char _buf[BUFFER_SIZE][MSSG_SIZE+1];
     int head;
     int tail;
     int count;

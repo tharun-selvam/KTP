@@ -28,9 +28,15 @@ int enqueue(struct data_buffer *ca, char* mssg) {
     if (isFull(ca)) {
         return 0;
     }
-    strcpy(ca->_buf[ca->tail], mssg);
+    printf("Before enque\n\t\thead: %d\n\t\ttail: %d\n\t\tsize: %d\n", ca->head, ca->tail, ca->count);
+    
+    strncpy(ca->_buf[ca->tail], mssg, MSSG_SIZE);
+    ca->_buf[ca->tail][MSSG_SIZE] = '\0';
+
     ca->tail = (ca->tail + 1) % BUFFER_SIZE;
     ca->count++;
+    printf("After enque\n\t\thead: %d\n\t\ttail: %d\n\t\tsize: %d\n", ca->head, ca->tail, ca->count);
+
     return 1;
 }
 
@@ -68,7 +74,10 @@ void application_print(int ktp_socket){
     // access SHM
     struct ktp_sockaddr* ktp_arr = open_ktp_arr();
 
+    init_semaphore(sem);
+    sem_wait(sem);
     print_buff(&ktp_arr[ktp_socket].send_buf);
+    sem_post(sem);
 
     shmdt(ktp_arr);
 }

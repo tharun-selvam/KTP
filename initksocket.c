@@ -25,10 +25,11 @@ sem_t *sem;
 #define P(s) semop(s, &pop, 1)
 #define V(s) semop(s, &vop, 1)
 
-#define P1 0.2  // Packet drop probability
+#define P1 0.01  // Packet drop probability
 
 int dropMessage(float p) {
     float random = (float)rand() / RAND_MAX;
+    printf("--- --- --- Packet droped --- --- ---\n");
     return random < p;
 }
 
@@ -37,10 +38,21 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, uint8_t ack_num) {
     ack_header.seq_num = 0;  // Not used for ACK
     ack_header.ack_num = ack_num;
     ack_header.is_ack = 1;
-    ack_header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;  // Available space
+    ack_header.rwnd_size = BUFFER_SIZE - sock->recv_buf.count;  // Available space
+
+    // empty message of size 512
+    char mssg[MSSG_SIZE+1] = "This is an ACK mssg";
 
     // Create ACK packet
-    char *ack_packet = pkt_create(ack_header, "");
+    char *ack_packet = pkt_create(ack_header, mssg);
+
+    struct ktp_header header_chk;
+    char mssg_chk[MSSG_SIZE+1];
+    extract_pkt(ack_packet, &header_chk, mssg_chk);
+    
+    printf("Checking ACK:\n\t\tMessage:|%s|\n", mssg_chk);
+
+    printf("Ack message of size %d prepared\n", sizeof(ack_packet));
     
     // Prepare destination address
     struct sockaddr_in dest_addr;
@@ -50,8 +62,10 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, uint8_t ack_num) {
     inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
 
     // Send ACK
-    sendto(sock_fd, ack_packet, sizeof(struct ktp_header), 0, 
+    sendto(sock_fd, ack_packet, PACKET_SIZE, 0, 
            (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+
+    printf("--- Ack successfully sent \n");
     
     // Update last ACK sent
     sock->last_ack_sent = ack_num;
@@ -100,6 +114,7 @@ void *R(void* arg) {
                 
                 printf("------ select received something!\n");
                 
+                // Receive the packet
                 char packet[PACKET_SIZE];
                 struct sockaddr_in sender_addr;
                 socklen_t addr_len = sizeof(sender_addr);
@@ -141,6 +156,9 @@ void *R(void* arg) {
                         ktp_arr[i].swnd.next_seq_num = (pkt_header.ack_num % 255) + 1;
                         ktp_arr[i].last_ack_sent = pkt_header.ack_num;
 
+                        ktp_arr[i].swnd.window_size++;
+                        dequeue(&ktp_arr[i].send_buf, NULL);
+
                         sem_post(sem);
                     } else {
                         // Out-of-order or duplicate ACK: ignore.
@@ -150,7 +168,7 @@ void *R(void* arg) {
                     // Accept the packet only if its sequence number matches the expected sequence.
                     if (pkt_header.seq_num == ktp_arr[i].rwnd.next_expected_seq) {
                         // Enqueue the message in the receiver buffer.
-                        printf("hereAck\n");
+                        printf("hereNewMssgRecv\n");
                         sem_wait(sem);
                         if (enqueue(&ktp_arr[i].recv_buf, message)) {
                             // Send ACK for this packet.
@@ -236,10 +254,16 @@ void *S(void *arg) {
             }
             // Case 2: No outstanding packet. Check if there is a pending message.
             else {
-                if (!isEmpty(&sock->send_buf)) {
+                if (!isEmpty(&sock->send_buf) && sock->swnd.window_size > 0) {
+                    // Print the buffer
+                    print_buff(&sock->send_buf);
+
                     // Peek at the first pending message in the send buffer.
                     char *message = sock->send_buf._buf[sock->send_buf.head];
-
+                    
+                    // int x = sock->send_buf.head;
+                    // if(x == 2)
+                    //     message = sock->send_buf._buf[sock->send_buf.head-1];
                     
                     // Build packet using the current next sequence number.
                     struct ktp_header header;
@@ -253,7 +277,7 @@ void *S(void *arg) {
                     struct sockaddr_in dest_addr;
                     memset(&dest_addr, 0, sizeof(dest_addr));
                     dest_addr.sin_family = AF_INET;
-                    printf("Port: %d IP: %s\n", sock->des_port, sock->des_ip);
+                    printf("Des. Port: %d Des. IP: %s\n", sock->des_port, sock->des_ip);
                     dest_addr.sin_port = htons(sock->des_port);
                     inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
                     
@@ -266,7 +290,10 @@ void *S(void *arg) {
                         printf("%d %s\n", ktp_arr[i].udp_fd, strerror(errno));
 
                     }
-                    printf("Packet sent\n");
+                    printf("Packet of size %d sent\n", sizeof(pkt));
+
+                    // Update window size
+                    sock->swnd.window_size--;
 
                     // Mark this packet as outstanding.
                     sock->swnd.base = header.seq_num;
