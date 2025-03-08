@@ -34,6 +34,10 @@ int dropMessage(float p) {
 }
 
 void send_ack(int sock_fd, struct ktp_sockaddr *sock, uint8_t ack_num) {
+    /*
+        Note: ACK message contains the last acked seq num and the amount of free messages 
+        the recv window can further receive
+    */
     struct ktp_header ack_header;
     ack_header.seq_num = 0;  // Not used for ACK
     ack_header.ack_num = ack_num;
@@ -68,7 +72,7 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, uint8_t ack_num) {
     printf("--- Ack successfully sent \n");
     
     // Update last ACK sent
-    sock->last_ack_sent = ack_num;
+    sock->rwnd.last_ack_sent = ack_num;
     
     free(ack_packet);
 }
@@ -152,9 +156,9 @@ void *R(void* arg) {
                         // Valid in-order ACK received:
                         // Clear the outstanding packet (set swnd.base to 0) and update next sequence.
                         ktp_arr[i].swnd.base = 0;
-                        // Update next sequence number: if ack is 255 then next becomes 1.
-                        ktp_arr[i].swnd.next_seq_num = (pkt_header.ack_num % 255) + 1;
-                        ktp_arr[i].last_ack_sent = pkt_header.ack_num;
+                        // Update next sequence number: if ack is MAX_SEQ_NUM then next becomes 1.
+                        ktp_arr[i].swnd.next_seq_num = (pkt_header.ack_num % MAX_SEQ_NUM) + 1;
+                        ktp_arr[i].rwnd.last_ack_sent = pkt_header.ack_num;
 
                         ktp_arr[i].swnd.window_size++;
                         dequeue(&ktp_arr[i].send_buf, NULL);
@@ -173,8 +177,8 @@ void *R(void* arg) {
                         if (enqueue(&ktp_arr[i].recv_buf, message)) {
                             // Send ACK for this packet.
                             send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], pkt_header.seq_num);
-                            // Update expected sequence number (wrap from 255 to 1)
-                            ktp_arr[i].rwnd.next_expected_seq = (pkt_header.seq_num % 255) + 1;
+                            // Update expected sequence number (wrap from MAX_SEQ_NUM to 1)
+                            ktp_arr[i].rwnd.next_expected_seq = (pkt_header.seq_num % MAX_SEQ_NUM) + 1;
                         }
                         sem_post(sem);
                     } else {
@@ -184,7 +188,7 @@ void *R(void* arg) {
                         sem_wait(sem);
                         uint8_t last_in_order;
                         if (ktp_arr[i].rwnd.next_expected_seq == 1)
-                            last_in_order = 255;
+                            last_in_order = MAX_SEQ_NUM;
                         else
                             last_in_order = ktp_arr[i].rwnd.next_expected_seq - 1;
                         send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], last_in_order);
@@ -297,8 +301,8 @@ void *S(void *arg) {
 
                     // Mark this packet as outstanding.
                     sock->swnd.base = header.seq_num;
-                    // Update next sequence number with wrap-around (1-255).
-                    sock->swnd.next_seq_num = (header.seq_num % 255) + 1;
+                    // Update next sequence number with wrap-around (1-MAX_SEQ_NUM).
+                    sock->swnd.next_seq_num = (header.seq_num % MAX_SEQ_NUM) + 1;
                     
                     // Record the send time.
                     gettimeofday(&sock->last_send_time, NULL);

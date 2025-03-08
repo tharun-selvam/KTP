@@ -126,6 +126,9 @@ const char* getCustomErrorMessage(CustomErrorCode error) {
         case ENOMESSAGE:
             return "No message in recv buffer";
 
+        case RECV_BUFF_FULL:
+            return "Enque in recv_buff not possible due to full buffer";
+
         default:
             return "Unknown error";
     }
@@ -228,22 +231,18 @@ int k_socket(int domain, int type, int protocol){
 
             // setting udp socket num in the SHM
             ktp_arr[i].udp_fd = udp_arr[i];
-
-            // setting seq_num
-            ktp_arr[i].last_ack_sent = -1;
-
+            
             // setting bind_status
             ktp_arr[i].bind_status = UNBINDED;
-
+            
             // init send and recv buffers
             initCircularArray(&ktp_arr[i].send_buf);
             initCircularArray(&ktp_arr[i].recv_buf);
-
+            
             // set other fields
             // ktp_arr[i].next_expected_seq = 1;
             ktp_arr[i].nospace_flag = 0;
-            ktp_arr[i].last_ack_sent = -1;
-
+            
             // init swnd
             ktp_arr[i].swnd.base = 0;
             ktp_arr[i].swnd.next_seq_num = 1;
@@ -251,13 +250,19 @@ int k_socket(int domain, int type, int protocol){
             memset(&ktp_arr[i].swnd.sent_seq_nums, 0, sizeof(ktp_arr[i].swnd.sent_seq_nums));
             
             // init rwnd
+            ktp_arr[i].rwnd.last_ack_sent = -1;
             ktp_arr[i].rwnd.base = 1;
-            ktp_arr[i].rwnd.window_size = WINDOW_SIZE;
-            ktp_arr[i].rwnd.next_expected_seq = 1;
             memset(&ktp_arr[i].rwnd.received_seq_nums, 0, sizeof(ktp_arr[i].rwnd.received_seq_nums));
-
+            
             memset(&ktp_arr[i].last_send_time, 0, sizeof(struct timeval));
             memset(&ktp_arr[i].swnd.send_times, 0, sizeof(ktp_arr[i].swnd.send_times));
+
+            ktp_arr[i].rwnd.free_space = WINDOW_SIZE;
+            
+            // initialise the expected seq numbers data structure
+            ktp_arr[i].rwnd.window_size = WINDOW_SIZE;
+            ktp_arr[i].rwnd.next_expected_seq = 1;
+            memset(&ktp_arr[i].rwnd.seq_nums_map, 0, sizeof(ktp_arr[i].rwnd.seq_nums_map));
 
             if(ktp_arr[i].udp_fd < 0){
                 setCustomError(ESOCKCREAT);
@@ -356,7 +361,6 @@ int k_sendto(int socket, const void *buffer, size_t length, int flags, const str
 
 void initialise_shm_ele(struct ktp_sockaddr* ele){
     ele->udp_fd = -1;
-    ele->last_ack_sent = -1;
 
     printf("here1\n");
     ele->process_id = -1;
@@ -371,7 +375,6 @@ void initialise_shm_ele(struct ktp_sockaddr* ele){
     initCircularArray(&ele->send_buf);
     initCircularArray(&ele->recv_buf);
     
-    ele->last_ack_sent = -1;
 
     // ele->next_expected_seq = -1;
     ele->bind_status = UNBINDED;
@@ -422,3 +425,83 @@ int k_close(int socket){
 void init_semaphore(sem_t *sem){
     sem = sem_open(SEM_NAME, 0);
 }
+
+
+// rwnd functions
+int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_sockaddr* sock){
+    // Updates the rwnd when new kpts are received
+    // Makes sure that only pkts within the window range is received
+    // Out of order pkts are stashed in the stash_buffer
+    // Returns updated window-size or -1 if err
+
+    int lower_limit = rwnd->next_expected_seq;
+    int upper_limit = lower_limit + rwnd->window_size - 1;
+
+    if(upper_limit > MAX_SEQ_NUM){
+        if(recvd_pkt_num >= 1 && recvd_pkt_num <= upper_limit % MAX_SEQ_NUM){
+            recvd_pkt_num += MAX_SEQ_NUM;
+        }
+    }
+
+    // pkt not in window range
+    if(recvd_pkt_num < lower_limit || recvd_pkt_num > upper_limit){
+        // send last ackd packet again with the same rwnd window size
+        return -1;
+    }
+
+    // nexte_expected pkt has arrived
+    if(recvd_pkt_num == lower_limit){
+        // update window size appropriately
+
+
+        // enqueue to recv_buf
+        if ( enqueue(&sock->recv_buf, mssg) < 0){
+            
+            setCustomError(RECV_BUFF_FULL);
+            return -1;
+
+        }
+
+        // unnecessary because lower_limit will always be in range [1, MAX_SEQ_NUM]
+        if(recvd_pkt_num > MAX_SEQ_NUM) recvd_pkt_num = recvd_pkt_num % MAX_SEQ_NUM;
+
+        // update window size
+        rwnd->seq_nums_map[recvd_pkt_num] = 0;
+        rwnd->free_space++;
+        
+        // iterate from lower_mit+1 and transfer from stash_buffer to enqueue buffer 
+        int tmp = lower_limit % MAX_SEQ_NUM + 1;
+        while(rwnd->seq_nums_map[tmp] == 1 && tmp <= (upper_limit % MAX_SEQ_NUM)){
+            
+            // move the mssg from stash buffer to main recv_buf 
+            enqueue(&sock->recv_buf, rwnd->stash_buffer[tmp]);
+            rwnd->stash_buffer[tmp][0] = '\0';
+
+            rwnd->seq_nums_map[tmp] = 0;
+            rwnd->free_space++;
+            tmp = tmp % MAX_SEQ_NUM;
+            tmp = tmp + 1;
+        }
+
+        rwnd->next_expected_seq = tmp;
+    }
+
+    // out of order but within window pkt has arrived
+
+    // update seq_nums_map and stash it in the buffer
+    if (rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] == 0){
+
+        rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] = 1;
+        strncpy(rwnd->stash_buffer[recvd_pkt_num % MAX_SEQ_NUM], mssg, MSSG_SIZE);
+        rwnd->stash_buffer[recvd_pkt_num % MAX_SEQ_NUM][MSSG_SIZE] = '\0';
+        rwnd->free_space--;
+    }
+
+    return rwnd->free_space;
+}
+
+/*
+    Add a parameter in rwnd to indicated how many more messages it can receive.
+    Right now window_size param is kinda ambiguous
+
+*/

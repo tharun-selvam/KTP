@@ -14,6 +14,7 @@
 #define SOCK_KTP 12345
 #define HEADER_SIZE 4
 #define PACKET_SIZE (MSSG_SIZE+HEADER_SIZE)
+#define MAX_SEQ_NUM 255
 
 /* Macros for bind_status used in ktp_arr */
 #define UNBINDED -1
@@ -41,9 +42,15 @@ typedef enum {
     ENOTBOUND,
 
     // k_recvfrom
-    ENOMESSAGE
+    ENOMESSAGE,
+
+    // recv_buff full
+    RECV_BUFF_FULL,
 
 } CustomErrorCode;
+
+struct ktp_sockaddr;
+
 
 static CustomErrorCode global_err_var;
 const char* getCustomErrorMessage(CustomErrorCode error);
@@ -76,10 +83,17 @@ struct swnd {
 
 struct rwnd {
     uint8_t base;           // Base of receiving window
-    uint8_t window_size;    // Current receive window size
-    uint8_t next_expected_seq;
     uint8_t received_seq_nums[WINDOW_SIZE]; // Array of received sequence numbers
+    uint8_t next_expected_seq;
+    uint8_t window_size;    // window size is a fixed value and does not chanhge
+    int seq_nums_map[MAX_SEQ_NUM+1];   // Array containing info of whether a pkt with the said sequence number has arrived
+    char stash_buffer[MAX_SEQ_NUM+1][MSSG_SIZE+1];    // Array that stashes out of order pkts
+
+    int free_space;         // 0-WINDOW_SIZE. Initial value is WINDOW_SIZE. 
+    uint8_t last_ack_sent;
 };
+
+int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_sockaddr* sock);
 
 struct ktp_sockaddr{
     int process_id;
@@ -99,7 +113,6 @@ struct ktp_sockaddr{
 
     struct timeval last_send_time;
     int nospace_flag;
-    uint8_t last_ack_sent;
 
     int bind_status;
 };
