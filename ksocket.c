@@ -467,7 +467,6 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
 
         // update window size
         rwnd->seq_nums_map[recvd_pkt_num] = 0;
-        rwnd->free_space++;
         
         // iterate from lower_mit+1 and transfer from stash_buffer to enqueue buffer 
         int tmp = lower_limit % MAX_SEQ_NUM + 1;
@@ -484,12 +483,12 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
         }
 
         rwnd->next_expected_seq = tmp;
+        rwnd->last_ack_sent = (tmp - 1) % MAX_SEQ_NUM;
     }
-
-    // out of order but within window pkt has arrived
-
-    // update seq_nums_map and stash it in the buffer
-    if (rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] == 0){
+    else if (rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] == 0){
+        // out of order but within window pkt has arrived
+    
+        // update seq_nums_map and stash it in the buffer
 
         rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] = 1;
         strncpy(rwnd->stash_buffer[recvd_pkt_num % MAX_SEQ_NUM], mssg, MSSG_SIZE);

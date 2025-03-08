@@ -33,16 +33,19 @@ int dropMessage(float p) {
     return random < p;
 }
 
-void send_ack(int sock_fd, struct ktp_sockaddr *sock, uint8_t ack_num) {
+void send_ack(int sock_fd, struct ktp_sockaddr *sock, int rwnd_size) {
     /*
         Note: ACK message contains the last acked seq num and the amount of free messages 
         the recv window can further receive
     */
+
+    uint8_t ack_num = sock->rwnd.last_ack_sent;
+
     struct ktp_header ack_header;
     ack_header.seq_num = 0;  // Not used for ACK
     ack_header.ack_num = ack_num;
     ack_header.is_ack = 1;
-    ack_header.rwnd_size = BUFFER_SIZE - sock->recv_buf.count;  // Available space
+    ack_header.rwnd_size = rwnd_size;  // Available space
 
     // empty message of size 512
     char mssg[MSSG_SIZE+1] = "This is an ACK mssg";
@@ -70,9 +73,6 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, uint8_t ack_num) {
            (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
     printf("--- Ack successfully sent \n");
-    
-    // Update last ACK sent
-    sock->rwnd.last_ack_sent = ack_num;
     
     free(ack_packet);
 }
@@ -132,10 +132,10 @@ void *R(void* arg) {
                     continue;
                 }
                 
-                // Simulate packet loss
-                if (dropMessage(P1)) {
-                    continue; // Drop packet
-                }
+                // // Simulate packet loss
+                // if (dropMessage(P1)) {
+                //     continue; // Drop packet
+                // }
                 
                 // Extract header and message
                 struct ktp_header pkt_header;
@@ -167,33 +167,48 @@ void *R(void* arg) {
                     } else {
                         // Out-of-order or duplicate ACK: ignore.
                     }
+                    
                 } else {
                     // Data message handling
                     // Accept the packet only if its sequence number matches the expected sequence.
-                    if (pkt_header.seq_num == ktp_arr[i].rwnd.next_expected_seq) {
-                        // Enqueue the message in the receiver buffer.
-                        printf("hereNewMssgRecv\n");
-                        sem_wait(sem);
-                        if (enqueue(&ktp_arr[i].recv_buf, message)) {
-                            // Send ACK for this packet.
-                            send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], pkt_header.seq_num);
-                            // Update expected sequence number (wrap from MAX_SEQ_NUM to 1)
-                            ktp_arr[i].rwnd.next_expected_seq = (pkt_header.seq_num % MAX_SEQ_NUM) + 1;
-                        }
-                        sem_post(sem);
-                    } else {
-                        // Out-of-order data packet: drop it.
-                        // send an ACK for the last in-order packet,
-                        printf("hereAck\n");
-                        sem_wait(sem);
-                        uint8_t last_in_order;
-                        if (ktp_arr[i].rwnd.next_expected_seq == 1)
-                            last_in_order = MAX_SEQ_NUM;
-                        else
-                            last_in_order = ktp_arr[i].rwnd.next_expected_seq - 1;
-                        send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], last_in_order);
-                        sem_post(sem);
+                    // if (pkt_header.seq_num == ktp_arr[i].rwnd.next_expected_seq) {
+                    //     // Enqueue the message in the receiver buffer.
+                    //     printf("hereNewMssgRecv\n");
+                    //     sem_wait(sem);
+                    //     if (enqueue(&ktp_arr[i].recv_buf, message)) {
+                    //         // Send ACK for this packet.
+                    //         send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], pkt_header.seq_num);
+                    //         // Update expected sequence number (wrap from MAX_SEQ_NUM to 1)
+                    //         ktp_arr[i].rwnd.next_expected_seq = (pkt_header.seq_num % MAX_SEQ_NUM) + 1;
+                    //     }
+                    //     sem_post(sem);
+                    // } else {
+                    //     // Out-of-order data packet: drop it.
+                    //     // send an ACK for the last in-order packet,
+                    //     printf("hereAck\n");
+                    //     sem_wait(sem);
+                    //     uint8_t last_in_order;
+                    //     if (ktp_arr[i].rwnd.next_expected_seq == 1)
+                    //         last_in_order = MAX_SEQ_NUM;
+                    //     else
+                    //         last_in_order = ktp_arr[i].rwnd.next_expected_seq - 1;
+                    //     send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], last_in_order);
+                    //     sem_post(sem);
+                    // }
+                    sem_wait(sem);
+                    int free_space = update_rwnd(&ktp_arr[i].rwnd, pkt_header.seq_num, message, &ktp_arr[i]);
+                    sem_post(sem);
+
+                    if(free_space != -1)
+                        send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], free_space);
+                    else{
+                        
+                        printf("Error receiving message. %s\n", getCustomErrorMessage(global_err_var));
+
+                        // resend the last sent ACK packet
+                        send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], free_space);
                     }
+
                 }
             }
         }else{
