@@ -25,7 +25,7 @@ sem_t *sem;
 #define P(s) semop(s, &pop, 1)
 #define V(s) semop(s, &vop, 1)
 
-#define P1 0.01  // Packet drop probability
+#define P1 0.4  // Packet drop probability
 
 int dropMessage(float p) {
     float random = (float)rand() / RAND_MAX;
@@ -128,10 +128,10 @@ void *R(void* arg) {
                     continue;
                 }
                 
-                // // Simulate packet loss
-                // if (dropMessage(P1)) {
-                //     continue; // Drop packet
-                // }
+                // Simulate packet loss
+                if (dropMessage(P1)) {
+                    continue; // Drop packet
+                }
                 
                 // Extract header and message
                 struct ktp_header pkt_header;
