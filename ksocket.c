@@ -441,9 +441,7 @@ int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, stru
     // SHM access
     struct ktp_sockaddr* ktp_arr = open_ktp_arr();
 
-    init_semaphore(sem);
-    sem_wait(sem);
-
+    
     int flag = 1;
     while(isEmpty(&ktp_arr[socket].recv_buf)){
         if(flag){
@@ -451,7 +449,9 @@ int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, stru
             printf("Waiting for a message in the receive buffer\n");
         }
     };
-
+    
+    init_semaphore(sem);
+    sem_wait(sem);
     if(dequeue(&ktp_arr[socket].recv_buf, (char *)buffer) == 0){
 
         setCustomError(ENOMESSAGE);
