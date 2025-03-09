@@ -11,7 +11,8 @@
 #include <errno.h>
 #include <semaphore.h>
 #include <sys/sem.h>
-#include <assert.h>
+#include <signal.h>
+#include <errno.h>
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
@@ -301,41 +302,65 @@ void *S(void *arg) {
             struct timeval current_time;
             gettimeofday(&current_time, NULL);
             
-            // Case 1: Outstanding packet exists. Check for timeout.
-            // if (sock->swnd.base != 0) {
-            //     double elapsed = (current_time.tv_sec - sock->last_send_time.tv_sec) +
-            //                      (current_time.tv_usec - sock->last_send_time.tv_usec) / 1000000.0;
-            //     if (elapsed >= T) {
-            //         // Retransmit the outstanding message.
-            //         // Retrieve the pending message from the front of the send buffer.
-            //         // We assume the message is stored at index send_buf.head.
-            //         char *message = sock->send_buf._buf[sock->send_buf.head];
-                    
-            //         // Build the packet using the outstanding packet's sequence number.
-            //         struct ktp_header header;
-            //         header.seq_num = sock->swnd.base;
-            //         header.is_ack = 0;
-            //         header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;
-                    
-            //         char *pkt = pkt_create(header, message);
-                    
-            //         // Prepare destination address.
-            //         struct sockaddr_in dest_addr;
-            //         memset(&dest_addr, 0, sizeof(dest_addr));
-            //         dest_addr.sin_family = AF_INET;
-            //         dest_addr.sin_port = htons(sock->des_port);
-            //         inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
-                    
-            //         // Retransmit the packet.
-            //         sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
-            //                (struct sockaddr*)&dest_addr, sizeof(dest_addr));
-                    
-            //         // Update send timestamp.
-            //         gettimeofday(&sock->last_send_time, NULL);
-                    
-            //         free(pkt);
-            //     }
-            // }
+            // Retransmission for outstanding packets in the valid window range.
+            if(1){
+                struct ktp_sockaddr *sock = &ktp_arr[i];
+                sem_wait(sem);
+                struct timeval current_time;
+                gettimeofday(&current_time, NULL);
+
+                // Compute the upper limit (circular, 1-indexed):
+                // Range: from sock->swnd.next_seq_num to upper_limit = ((sock->swnd.next_seq_num - 1 + sock->swnd.window_size) % MAX_SEQ_NUM) + 1.
+                // Iterate over the window entries.
+                for (int j = 0; j < sock->swnd.window_size; j++) {
+                    int seq_num = ((sock->swnd.next_seq_num - 1 + j) % MAX_SEQ_NUM) + 1;
+                    // Check if this packet is outstanding (0 indicates outstanding).
+                    if (sock->swnd.sent_seq_nums[seq_num] == 0) {
+                        double elapsed = (current_time.tv_sec - sock->swnd.send_times[seq_num].tv_sec) +
+                                        (current_time.tv_usec - sock->swnd.send_times[seq_num].tv_usec) / 1000000.0;
+                        if (elapsed >= T) {
+                            // Retrieve the message corresponding to this outstanding packet.
+                            // We assume that the outstanding packets are stored in the send buffer in order.
+                            // Use getKMessages to retrieve up to window_size messages.
+                            char **k_messages = NULL;
+                            int num_msgs = getKMessages(&sock->send_buf, sock->swnd.window_size, &k_messages);
+                            // Map the j-th outstanding message to seq_num.
+                            if (j < num_msgs) {
+                                struct ktp_header header;
+                                header.seq_num = seq_num;
+                                header.is_ack = 0;
+                                header.rwnd_size = sock->swnd.available_rwnd;  // current available space
+
+                                char *pkt = pkt_create(header, k_messages[j]);
+
+                                // Prepare destination address.
+                                struct sockaddr_in dest_addr;
+                                memset(&dest_addr, 0, sizeof(dest_addr));
+                                dest_addr.sin_family = AF_INET;
+                                dest_addr.sin_port = htons(sock->des_port);
+                                inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
+
+                                if (sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
+                                        (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0) {
+                                    printf("Retransmission error for seq %d: %s\n", seq_num, strerror(errno));
+                                } else {
+                                    printf("Retransmitted packet with seq %d after %.2f seconds elapsed\n", seq_num, elapsed);
+                                }
+                                free(pkt);
+                            }
+                            // Free the messages retrieved by getKMessages.
+                            if (k_messages != NULL) {
+                                for (int m = 0; m < num_msgs; m++) {
+                                    free(k_messages[m]);
+                                }
+                                free(k_messages);
+                            }
+                        }
+                    }
+                }
+                sem_post(sem);
+            }
+
             // Case 2: No outstanding packet. Check if there is a pending message.
             if(1) {
                 // if (!isEmpty(&sock->send_buf) && sock->swnd.window_size > 0) {
@@ -563,36 +588,46 @@ int main(){
 
     // main funciton now checks for outstanding k_bind calls
     // and binds them
+    // also includes garbage collector code to call k_close on processes that have died
+    // without calling it
     while(1){
 
         for(int i=0; i<MAX_CONC_SOSCKETS; i++){
             
-            sem_wait(sem);
-
+            
             if(ktp_arr[i].process_id < 0){
                 continue;
             }
-
+            
+            // check if the process has called for an outstanding bind
             struct ktp_sockaddr* sock = &ktp_arr[i];
-
+            
             if(ktp_arr[i].bind_status == AWAIT_BIND){
-
+                
                 struct sockaddr_in servaddr;
                 memset(&servaddr, 0, sizeof(servaddr));
                 servaddr.sin_family = AF_INET;
                 servaddr.sin_port = htons(sock->src_port);
                 servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
+                
                 if(bind(sock->udp_fd, (struct sockaddr*)&servaddr, sizeof(servaddr))){
                     setCustomError(EBIND);
                 }
                 else{
+                    sem_wait(sem);
                     ktp_arr[i].bind_status = BINDED;
+                    sem_post(sem);
                     printf("Process %d binded\n", ktp_arr[i].process_id);
                 }
             }
 
-            sem_post(sem);
+            // check if the process has died without calling k_close
+            if (kill(ktp_arr[i].process_id, 0) == -1 && errno == ESRCH) {
+                sem_wait(sem);
+                k_close(i);
+                sem_close(sem);
+            }
+
         }
 
     }

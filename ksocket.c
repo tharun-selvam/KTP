@@ -555,7 +555,7 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
         rwnd->free_space--;
     }
 
-    return rwnd->free_space;
+
 }
 
 /*

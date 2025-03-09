@@ -49,7 +49,9 @@ int main() {
             printf("User1: Sent: %s\n", message);
         }
         counter++;
-        sleep(1); // send one message per second
+
+        if(counter%3 == 0)
+            sleep(5); // send one message per second
     }
     
     k_close(sock);
