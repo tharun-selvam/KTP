@@ -13,7 +13,6 @@
 #include <sys/sem.h>
 #include <assert.h>
 
-
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
 // Shared Memory
@@ -29,7 +28,7 @@ sem_t *sem;
 #define P(s) semop(s, &pop, 1)
 #define V(s) semop(s, &vop, 1)
 
-#define P1 0.4  // Packet drop probability
+#define P1 0.2  // Packet drop probability
 
 int dropMessage(float p) {
     float random = (float)rand() / RAND_MAX;
@@ -136,7 +135,7 @@ void *R(void* arg) {
                     continue;
                 }
                 
-                // // Simulate packet loss
+                // Simulate packet loss
                 // if (dropMessage(P1)) {
                 //     continue; // Drop packet
                 // }
@@ -412,7 +411,7 @@ void *S(void *arg) {
                 for(int i=0; i<sock->swnd.window_size; i++){
                     // Build packet using the current next sequence number.
                     struct ktp_header header;
-                    header.seq_num = sock->swnd.next_seq_num % MAX_SEQ_NUM + i;
+                    header.seq_num = ((sock->swnd.next_seq_num - 1 + i) % MAX_SEQ_NUM) + 1;
                     header.is_ack = 0;
                     header.rwnd_size = -1; // irrelavent
 

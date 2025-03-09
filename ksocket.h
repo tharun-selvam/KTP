@@ -82,7 +82,7 @@ struct swnd {
     uint8_t base;           // For our design: 0 indicates no outstanding packet.
     uint8_t next_seq_num;   // Next sequence number to use.
     uint8_t window_size;    // This is less relevant now (still defined as WINDOW_SIZE).
-    uint8_t sent_seq_nums[MAX_SEQ_NUM+1]; // Unused in our one-packet model.
+    uint8_t sent_seq_nums[MAX_SEQ_NUM+1]; // 0-> outstanding. 1 means received already. keeps track of outstanding packets
     struct timeval send_times[MAX_SEQ_NUM+1]; // Unused in our one-packet model.
 
     int available_rwnd;     // Indicates the remaining space available in the rwnd-

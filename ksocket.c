@@ -266,6 +266,12 @@ int k_socket(int domain, int type, int protocol){
         
         printf("%d ", ktp_arr[i].process_id);
 
+    }
+    printf("\n");
+    for(i=0; i<MAX_CONC_SOSCKETS; i++){
+        
+        printf("%d ", ktp_arr[i].process_id);
+
         if(ktp_arr[i].process_id < 0){
             // free socket available
             flag = 1;
