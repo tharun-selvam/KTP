@@ -5,6 +5,8 @@
 #include <arpa/inet.h>
 #include "ksocket.h"
 
+#define NUM 10
+
 int main() {
     int sock = k_socket(AF_INET, SOCK_KTP, 0);
     if (sock < 0) {
@@ -27,28 +29,36 @@ int main() {
     inet_pton(AF_INET, "127.0.0.1", &dest_addr.sin_addr);
     
     // Three messages to send
-    char *messages[3] = {
+    char *messages[NUM] = {
         "Message 1: Hello from User1",
         "Message 2: How are you?",
-        "Message 3: Goodbye!"
+        "Message 3: Goodbye!",
+        "Message 4: Hope you're doing well.",
+        "Message 5: Just checking in.",
+        "Message 6: What's up?",
+        "Message 7: Call me when you can.",
+        "Message 8: I'll be waiting.",
+        "Message 9: See you at the meeting.",
+        "Message 10: Keep in touch."
     };
+    
     
     application_print(sock);
     
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < NUM; i++) {
         int sent = k_sendto(sock, messages[i], strlen(messages[i]) + 1, 0,
                              (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (sent < 0) {
             printf("Error sending message %d\n", i + 1);
+            printf("Error:\t%s\n", getCustomErrorMessage(global_err_var));
         } else {
             printf("Sent: %s\n", messages[i]);
             // application_print(sock);
 
         }
         // Wait a bit to allow the ACK and transmission logic to complete
-        sleep(2);
 
-        if(i == 2){
+        if(i == NUM-1){
             char c;
             scanf(" %c", &c);
         }

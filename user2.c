@@ -22,7 +22,8 @@ int main() {
     char buffer[MSSG_SIZE + 1];
     
     // Receive three messages
-    for (int i = 0; i < 3; i++) {
+    int i = 0;
+    while(1) {
         int recvd = k_recvfrom(sock, buffer, sizeof(buffer), 0, NULL, NULL);
         if (recvd < 0) {
             printf("Error receiving message %d\n%s\n", i + 1, getCustomErrorMessage(global_err_var));
@@ -30,6 +31,8 @@ int main() {
         } else {
             printf("Received: %s\n", buffer);
         }
+
+        i++;
     }
     
     k_close(sock);

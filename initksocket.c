@@ -11,6 +11,10 @@
 #include <errno.h>
 #include <semaphore.h>
 #include <sys/sem.h>
+#include <assert.h>
+
+
+#define min(a, b) ((a) < (b) ? (a) : (b))
 
 // Shared Memory
 int shmid, shmkey;
@@ -59,7 +63,7 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, int rwnd_size) {
     
     printf("Checking ACK:\n\t\tMessage:|%s|\n", mssg_chk);
 
-    printf("Ack message of size %d prepared\n", sizeof(ack_packet));
+    printf("Ack message of size %lu prepared\n", sizeof(ack_packet));
     
     // Prepare destination address
     struct sockaddr_in dest_addr;
@@ -149,24 +153,86 @@ void *R(void* arg) {
                     // ACK message handling
                     // Check if the ACK is for the outstanding packet.
                     // We assume swnd.base holds the sequence number of the packet currently in flight.
-                    if (pkt_header.ack_num == ktp_arr[i].swnd.base) {
+                    if (pkt_header.ack_num == ktp_arr[i].swnd.next_seq_num) {
                         
                         printf("hereAck\n");
                         sem_wait(sem);
                         // Valid in-order ACK received:
-                        // Clear the outstanding packet (set swnd.base to 0) and update next sequence.
-                        ktp_arr[i].swnd.base = 0;
                         // Update next sequence number: if ack is MAX_SEQ_NUM then next becomes 1.
                         ktp_arr[i].swnd.next_seq_num = (pkt_header.ack_num % MAX_SEQ_NUM) + 1;
+                        
                         ktp_arr[i].rwnd.last_ack_sent = pkt_header.ack_num;
 
-                        ktp_arr[i].swnd.window_size++;
+                        // update available rwnd size
+                        ktp_arr[i].swnd.available_rwnd = pkt_header.rwnd_size;
+
+                        // remove the message from send buffer
                         dequeue(&ktp_arr[i].send_buf, NULL);
 
+                        // update window size
+                        ktp_arr[i].swnd.window_size = min(sizeOfCircularArray(&ktp_arr[i].send_buf), ktp_arr[i].swnd.available_rwnd);
+
+                        // update send_times
+                        ktp_arr[i].swnd.send_times[pkt_header.ack_num].tv_sec = 0;
+                        ktp_arr[i].swnd.send_times[pkt_header.ack_num].tv_usec = 0;
+
+                        // update outstanding pkt
+                        ktp_arr[i].swnd.sent_seq_nums[pkt_header.ack_num] = 1;
+
                         sem_post(sem);
-                    } else {
-                        // Out-of-order or duplicate ACK: ignore.
+                    } else{
+                        // Compute the lower (base) and upper limit of valid outstanding sequence numbers.
+                        uint8_t base = ktp_arr[i].swnd.next_seq_num;
+                        uint8_t window_size = ktp_arr[i].swnd.window_size;
+                        uint8_t upper_limit = (((base - 1) + (window_size - 1)) % MAX_SEQ_NUM) + 1;
+
+                        // Now, check if the received ACK is within the window.
+                        // Two cases are needed to account for wrap-around.
+                        int flag = 0;
+                        if (base <= upper_limit) {
+                            // No wrap-around: valid ACK must be > base and <= upper_limit.
+                            if (pkt_header.ack_num > base && pkt_header.ack_num <= upper_limit) {
+                                flag = 1;
+                            }
+                        } else {
+                            // Wrap-around case: valid ACK is either greater than base or less than or equal to upper_limit.
+                            if (pkt_header.ack_num > base || pkt_header.ack_num <= upper_limit) {
+                                // Process duplicate or out-of-order ACK here.
+                                flag = 1;
+                            }
+                        }
+                        
+                        if(flag == 1){
+                            // Out of order ACK signifies that all packets upto that number were recvd
+
+                            struct ktp_sockaddr* sock = &ktp_arr[i];
+                            
+                            int tmp = sock->swnd.next_seq_num;
+                            sem_wait(sem);
+                            while(1){
+                                sock->swnd.send_times[tmp].tv_sec = 0;
+                                sock->swnd.send_times[tmp].tv_usec = 0;
+                                sock->swnd.sent_seq_nums[tmp] = 0;
+                                dequeue(&ktp_arr[i].send_buf, NULL);
+                                
+                                if(tmp == pkt_header.ack_num){
+                                    sock->swnd.next_seq_num = (tmp )% MAX_SEQ_NUM + 1;
+                                    break;
+                                }
+
+                                tmp = (tmp )% MAX_SEQ_NUM + 1;
+                            }
+                            sem_post(sem);
+
+                            ktp_arr[i].swnd.window_size = min(sizeOfCircularArray(&ktp_arr[i].send_buf), ktp_arr[i].swnd.available_rwnd);
+                            ktp_arr[i].swnd.available_rwnd = pkt_header.rwnd_size;
+
+                            ktp_arr[i].rwnd.last_ack_sent = pkt_header.ack_num;
+                        }
+                        
                     }
+                    
+                    print_swnd(&ktp_arr[i].swnd, &ktp_arr[i].send_buf);
                     
                 } else {
                     // Data message handling
@@ -237,92 +303,136 @@ void *S(void *arg) {
             gettimeofday(&current_time, NULL);
             
             // Case 1: Outstanding packet exists. Check for timeout.
-            if (sock->swnd.base != 0) {
-                double elapsed = (current_time.tv_sec - sock->last_send_time.tv_sec) +
-                                 (current_time.tv_usec - sock->last_send_time.tv_usec) / 1000000.0;
-                if (elapsed >= T) {
-                    // Retransmit the outstanding message.
-                    // Retrieve the pending message from the front of the send buffer.
-                    // We assume the message is stored at index send_buf.head.
-                    char *message = sock->send_buf._buf[sock->send_buf.head];
+            // if (sock->swnd.base != 0) {
+            //     double elapsed = (current_time.tv_sec - sock->last_send_time.tv_sec) +
+            //                      (current_time.tv_usec - sock->last_send_time.tv_usec) / 1000000.0;
+            //     if (elapsed >= T) {
+            //         // Retransmit the outstanding message.
+            //         // Retrieve the pending message from the front of the send buffer.
+            //         // We assume the message is stored at index send_buf.head.
+            //         char *message = sock->send_buf._buf[sock->send_buf.head];
                     
-                    // Build the packet using the outstanding packet's sequence number.
-                    struct ktp_header header;
-                    header.seq_num = sock->swnd.base;
-                    header.is_ack = 0;
-                    header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;
+            //         // Build the packet using the outstanding packet's sequence number.
+            //         struct ktp_header header;
+            //         header.seq_num = sock->swnd.base;
+            //         header.is_ack = 0;
+            //         header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;
                     
-                    char *pkt = pkt_create(header, message);
+            //         char *pkt = pkt_create(header, message);
                     
-                    // Prepare destination address.
-                    struct sockaddr_in dest_addr;
-                    memset(&dest_addr, 0, sizeof(dest_addr));
-                    dest_addr.sin_family = AF_INET;
-                    dest_addr.sin_port = htons(sock->des_port);
-                    inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
+            //         // Prepare destination address.
+            //         struct sockaddr_in dest_addr;
+            //         memset(&dest_addr, 0, sizeof(dest_addr));
+            //         dest_addr.sin_family = AF_INET;
+            //         dest_addr.sin_port = htons(sock->des_port);
+            //         inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
                     
-                    // Retransmit the packet.
-                    sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
-                           (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+            //         // Retransmit the packet.
+            //         sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
+            //                (struct sockaddr*)&dest_addr, sizeof(dest_addr));
                     
-                    // Update send timestamp.
-                    gettimeofday(&sock->last_send_time, NULL);
+            //         // Update send timestamp.
+            //         gettimeofday(&sock->last_send_time, NULL);
                     
-                    free(pkt);
-                }
-            }
+            //         free(pkt);
+            //     }
+            // }
             // Case 2: No outstanding packet. Check if there is a pending message.
-            else {
-                if (!isEmpty(&sock->send_buf) && sock->swnd.window_size > 0) {
-                    // Print the buffer
-                    print_buff(&sock->send_buf);
+            if(1) {
+                // if (!isEmpty(&sock->send_buf) && sock->swnd.window_size > 0) {
+                //     // Print the buffer
+                //     print_buff(&sock->send_buf);
 
-                    // Peek at the first pending message in the send buffer.
-                    char *message = sock->send_buf._buf[sock->send_buf.head];
+                //     // Peek at the first pending message in the send buffer.
+                //     char *message = sock->send_buf._buf[sock->send_buf.head];
                     
-                    // int x = sock->send_buf.head;
-                    // if(x == 2)
-                    //     message = sock->send_buf._buf[sock->send_buf.head-1];
+                //     // int x = sock->send_buf.head;
+                //     // if(x == 2)
+                //     //     message = sock->send_buf._buf[sock->send_buf.head-1];
                     
+                //     // Build packet using the current next sequence number.
+                //     struct ktp_header header;
+                //     header.seq_num = sock->swnd.next_seq_num;
+                //     header.is_ack = 0;
+                //     header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;
+                    
+                //     char *pkt = pkt_create(header, message);
+                    
+                //     // Prepare destination address.
+                //     struct sockaddr_in dest_addr;
+                //     memset(&dest_addr, 0, sizeof(dest_addr));
+                //     dest_addr.sin_family = AF_INET;
+                //     printf("Des. Port: %d Des. IP: %s\n", sock->des_port, sock->des_ip);
+                //     dest_addr.sin_port = htons(sock->des_port);
+                //     inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
+                    
+                //     printf("here1\n");
+                //     printf("Message sent: |%s|\n", message);
+                //     // Send the packet.
+                //     if(sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
+                //            (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0 ){
+
+                //         printf("%d %s\n", ktp_arr[i].udp_fd, strerror(errno));
+
+                //     }
+                //     printf("Packet of size %d sent\n", sizeof(pkt));
+
+                //     // Update window size
+                //     sock->swnd.window_size--;
+
+                //     // Mark this packet as outstanding.
+                //     sock->swnd.base = header.seq_num;
+                //     // Update next sequence number with wrap-around (1-MAX_SEQ_NUM).
+                //     sock->swnd.next_seq_num = (header.seq_num % MAX_SEQ_NUM) + 1;
+                    
+                //     // Record the send time.
+                    // gettimeofday(&sock->last_send_time, NULL);
+                    
+                //     free(pkt);
+                // }
+
+
+                struct ktp_sockaddr * sock = &ktp_arr[i];
+                
+                // extract 'limit' number of messages to send from send_buf
+                sock->swnd.window_size = min(sizeOfCircularArray(&sock->send_buf), sock->swnd.available_rwnd);
+                char **k_messages = NULL;
+                getKMessages(&sock->send_buf, sock->swnd.window_size, &k_messages);
+                
+                // prepare destination address.
+                struct sockaddr_in dest_addr;
+                memset(&dest_addr, 0, sizeof(dest_addr));
+                dest_addr.sin_family = AF_INET;
+                dest_addr.sin_port = htons(sock->des_port);
+                inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
+                
+                if(sock->swnd.window_size > 0)
+                printf("Sending %d messages to Des. Port: %d Des. IP: %s\n", sock->swnd.window_size, sock->des_port, sock->des_ip);
+                
+                for(int i=0; i<sock->swnd.window_size; i++){
                     // Build packet using the current next sequence number.
                     struct ktp_header header;
-                    header.seq_num = sock->swnd.next_seq_num;
+                    header.seq_num = sock->swnd.next_seq_num % MAX_SEQ_NUM + i;
                     header.is_ack = 0;
-                    header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;
+                    header.rwnd_size = -1; // irrelavent
+
+                    if (sock->swnd.sent_seq_nums[header.seq_num] == 0) continue;
                     
-                    char *pkt = pkt_create(header, message);
-                    
-                    // Prepare destination address.
-                    struct sockaddr_in dest_addr;
-                    memset(&dest_addr, 0, sizeof(dest_addr));
-                    dest_addr.sin_family = AF_INET;
-                    printf("Des. Port: %d Des. IP: %s\n", sock->des_port, sock->des_ip);
-                    dest_addr.sin_port = htons(sock->des_port);
-                    inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
-                    
-                    printf("here1\n");
-                    printf("Message sent: |%s|\n", message);
+                    char *pkt = pkt_create(header, k_messages[i]);
+
                     // Send the packet.
                     if(sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
-                           (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0 ){
+                        (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0 ){
 
                         printf("%d %s\n", ktp_arr[i].udp_fd, strerror(errno));
 
                     }
-                    printf("Packet of size %d sent\n", sizeof(pkt));
 
-                    // Update window size
-                    sock->swnd.window_size--;
+                    // update swnd to keep track of outstanding pkts
+                    sock->swnd.sent_seq_nums[header.seq_num] = 0;
 
-                    // Mark this packet as outstanding.
-                    sock->swnd.base = header.seq_num;
-                    // Update next sequence number with wrap-around (1-MAX_SEQ_NUM).
-                    sock->swnd.next_seq_num = (header.seq_num % MAX_SEQ_NUM) + 1;
-                    
-                    // Record the send time.
-                    gettimeofday(&sock->last_send_time, NULL);
-                    
-                    free(pkt);
+                    gettimeofday(&sock->swnd.send_times[header.seq_num], NULL);
+
                 }
             }
         }

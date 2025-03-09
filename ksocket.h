@@ -8,13 +8,13 @@
 #include <semaphore.h>
 
 
-#define WINDOW_SIZE 1
+#define WINDOW_SIZE 3
 #define BUFFER_SIZE 10
 #define MSSG_SIZE 512
 #define SOCK_KTP 12345
 #define HEADER_SIZE 4
 #define PACKET_SIZE (MSSG_SIZE+HEADER_SIZE)
-#define MAX_SEQ_NUM 255
+#define MAX_SEQ_NUM 8
 
 /* Macros for bind_status used in ktp_arr */
 #define UNBINDED -1
@@ -47,6 +47,9 @@ typedef enum {
     // recv_buff full
     RECV_BUFF_FULL,
 
+    // send_buf
+    ERR_ALLOCATING,
+
 } CustomErrorCode;
 
 struct ktp_sockaddr;
@@ -70,30 +73,35 @@ int isFull(struct data_buffer *ca);
 int isEmpty(struct data_buffer *ca);
 int enqueue(struct data_buffer *ca, char* mssg);
 int dequeue(struct data_buffer *ca, char *mssg);
+int sizeOfCircularArray(struct data_buffer *ca);
 void print_buff(struct data_buffer *ca);
 void application_print(int ktp_socket);
+int getKMessages(struct data_buffer* ca, int k, char *** message_buf);
 
 struct swnd {
     uint8_t base;           // For our design: 0 indicates no outstanding packet.
     uint8_t next_seq_num;   // Next sequence number to use.
     uint8_t window_size;    // This is less relevant now (still defined as WINDOW_SIZE).
-    uint8_t sent_seq_nums[WINDOW_SIZE]; // Unused in our one-packet model.
-    struct timeval send_times[WINDOW_SIZE]; // Unused in our one-packet model.
+    uint8_t sent_seq_nums[MAX_SEQ_NUM+1]; // Unused in our one-packet model.
+    struct timeval send_times[MAX_SEQ_NUM+1]; // Unused in our one-packet model.
+
+    int available_rwnd;     // Indicates the remaining space available in the rwnd-
 };
 
 struct rwnd {
     uint8_t base;           // Base of receiving window
-    uint8_t received_seq_nums[WINDOW_SIZE]; // Array of received sequence numbers
     uint8_t next_expected_seq;
     uint8_t window_size;    // window size is a fixed value and does not chanhge
     int seq_nums_map[MAX_SEQ_NUM+1];   // Array containing info of whether a pkt with the said sequence number has arrived
     char stash_buffer[MAX_SEQ_NUM+1][MSSG_SIZE+1];    // Array that stashes out of order pkts
 
-    int free_space;         // 0-WINDOW_SIZE. Initial value is WINDOW_SIZE. 
+    int free_space;         // 0-WINDOW_SIZE. Initial value is WINDOW_SIZE. Indicates how many more messages can be recevied by recv window
     uint8_t last_ack_sent;
 };
 
 int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_sockaddr* sock);
+
+void print_swnd(struct swnd *sw, struct data_buffer *buf);
 
 struct ktp_sockaddr{
     int process_id;

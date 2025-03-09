@@ -52,6 +52,53 @@ int dequeue(struct data_buffer *ca, char *mssg) {
     return 1;
 }
 
+int sizeOfCircularArray(struct data_buffer *ca){
+    return ca->count;
+}
+
+int getKMessages(struct data_buffer* ca, int k, char ***message_buf) {
+    /* 
+     * This function retrieves the topmost k messages from the circular buffer 'ca'
+     * without removing them (i.e. it does not dequeue the messages).
+     * Returns number of messages loaded. -1 if error
+     */
+    
+    // Allocate memory for k pointers to message strings.
+    *message_buf = (char **)malloc(sizeof(char *) * k);
+    if (!(*message_buf)) {
+        setCustomError(ERR_ALLOCATING);
+        return -1;
+    }
+    
+    // Determine the actual number of messages available (cannot exceed the current count).
+    int num_messages = (k < ca->count) ? k : ca->count;
+    
+    // Start from the head of the circular buffer.
+    int index = ca->head;
+    for (int i = 0; i < num_messages; i++) {
+        // Allocate memory for each message string (plus one byte for the null terminator).
+        (*message_buf)[i] = (char *)malloc(sizeof(char) * (MSSG_SIZE + 1));
+        if (!(*message_buf)[i]) {
+            // In case of allocation failure, free previously allocated memory.
+            for (int j = 0; j < i; j++) {
+                free((*message_buf)[j]);
+            }
+            free((*message_buf));
+            return -1;
+        }
+        // Copy the message from the circular buffer to the allocated space.
+        strncpy((*message_buf)[i], ca->_buf[index], MSSG_SIZE);
+        // Ensure null termination.
+        (*message_buf)[i][MSSG_SIZE] = '\0';
+        
+        // Move to the next message in the circular buffer, wrapping around if necessary.
+        index = (index + 1) % BUFFER_SIZE;
+    }
+
+    return num_messages;
+}
+
+
 void print_buff(struct data_buffer *ca){
     if(isEmpty(ca)){
         printf("Empty buffer\n");
@@ -128,6 +175,9 @@ const char* getCustomErrorMessage(CustomErrorCode error) {
 
         case RECV_BUFF_FULL:
             return "Enque in recv_buff not possible due to full buffer";
+
+        case ERR_ALLOCATING:
+            return "Memory could not be allocated.";
 
         default:
             return "Unknown error";
@@ -247,12 +297,12 @@ int k_socket(int domain, int type, int protocol){
             ktp_arr[i].swnd.base = 0;
             ktp_arr[i].swnd.next_seq_num = 1;
             ktp_arr[i].swnd.window_size = WINDOW_SIZE;
-            memset(&ktp_arr[i].swnd.sent_seq_nums, 0, sizeof(ktp_arr[i].swnd.sent_seq_nums));
+            ktp_arr[i].swnd.available_rwnd = WINDOW_SIZE;
+            memset(&ktp_arr[i].swnd.sent_seq_nums, 1, sizeof(ktp_arr[i].swnd.sent_seq_nums));
             
             // init rwnd
             ktp_arr[i].rwnd.last_ack_sent = -1;
             ktp_arr[i].rwnd.base = 1;
-            memset(&ktp_arr[i].rwnd.received_seq_nums, 0, sizeof(ktp_arr[i].rwnd.received_seq_nums));
             
             memset(&ktp_arr[i].last_send_time, 0, sizeof(struct timeval));
             memset(&ktp_arr[i].swnd.send_times, 0, sizeof(ktp_arr[i].swnd.send_times));
@@ -401,6 +451,7 @@ int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, stru
         setCustomError(ENOMESSAGE);
         shmdt(ktp_arr);
 
+        sem_post(sem);
         return -1;
     }
 
@@ -429,7 +480,7 @@ void init_semaphore(sem_t *sem){
 
 // rwnd functions
 int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_sockaddr* sock){
-    // Updates the rwnd when new kpts are received
+    // Updates the rwnd when new pkts are received
     // Makes sure that only pkts within the window range is received
     // Out of order pkts are stashed in the stash_buffer
     // Returns updated window-size or -1 if err
@@ -483,7 +534,9 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
         }
 
         rwnd->next_expected_seq = tmp;
-        rwnd->last_ack_sent = (tmp - 1) % MAX_SEQ_NUM;
+        // rwnd->last_ack_sent = (tmp - 1) % MAX_SEQ_NUM;
+        rwnd->last_ack_sent = (tmp == 1) ? MAX_SEQ_NUM : (tmp - 1);
+
     }
     else if (rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] == 0){
         // out of order but within window pkt has arrived
@@ -504,3 +557,38 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
     Right now window_size param is kinda ambiguous
 
 */
+
+void print_swnd(struct swnd *sw, struct data_buffer *buf) {
+    if (!sw) {
+        printf("Sender window pointer is NULL.\n");
+        return;
+    }
+    
+    printf("----- Sender Window State -----\n");
+    printf("Base: %u\n", sw->base);
+    printf("Next Sequence Number: %u\n", sw->next_seq_num);
+    printf("Window Size: %u\n", sw->window_size);
+    
+    printf("\nSent Sequence Numbers:\n");
+    // Loop through the entire array (MAX_SEQ_NUM+1 elements)
+    for (int i = 0; i < MAX_SEQ_NUM + 1; i++) {
+        printf("%3u ", sw->sent_seq_nums[i]);
+        // Print a newline every 16 values for better readability
+        if ((i + 1) % 16 == 0)
+            printf("\n");
+    }
+    printf("\n");
+    
+    printf("\nSend Times (in seconds and microseconds):\n");
+    // Since WINDOW_SIZE is the size of the send_times array, loop through each element.
+    for (int i = 0; i < WINDOW_SIZE; i++) {
+        printf("Packet %d: %ld sec, %ld usec\n", 
+               i, 
+               (long)sw->send_times[i].tv_sec, 
+               (long)sw->send_times[i].tv_usec);
+    }
+    
+    printf("\nAvailable Receiver Window: %d\n", sw->available_rwnd);
+    print_buff(buf);
+    printf("--------------------------------\n");
+}
