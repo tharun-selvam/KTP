@@ -16,6 +16,9 @@
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
+volatile int running = 1;
+pthread_t send_thread, recv_thread;
+
 // Shared Memory
 int shmid, shmkey;
 int shmid_udp_sock, shmkey_udp_sock;
@@ -29,7 +32,7 @@ sem_t *sem;
 #define P(s) semop(s, &pop, 1)
 #define V(s) semop(s, &vop, 1)
 
-#define P1 0.5  // Packet drop probability
+#define P1 0.0  // Packet drop probability
 
 int dropMessage(float p) {
     float random = (float)rand() / RAND_MAX;
@@ -84,7 +87,7 @@ void *R(void* arg) {
     srand(time(NULL));
     struct timeval timeout;
     
-    while (1) {
+    while (running) {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         int maxfd = -1;
@@ -298,7 +301,7 @@ void *R(void* arg) {
 // Thread S: Handles timeouts and retransmissions for one-packet-at-a-time.
 void *S(void *arg) {
     // T is defined in ksocket.h, e.g. #define T 5
-    while (1) {
+    while (running) {
         
         sleep(T / 2);
         
@@ -432,15 +435,23 @@ void *S(void *arg) {
 
 void custom_exit(int status){
 
+    running = 0;
+
+    pthread_join(recv_thread, NULL);
+    pthread_join(send_thread, NULL);
+
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
         
-        printf("%d ", i);
+        printf("%d", i);
         close(udp_sock_fds[i]);
+        printf("%d ", i);
 
     }
 
+    sem_wait(sem);
     shmdt(ktp_arr);
     shmctl(shmid, IPC_RMID, NULL);
+    sem_post(sem);
 
     shmdt(udp_sock_fds);
     shmctl(shmid_udp_sock, IPC_RMID, NULL);
@@ -482,7 +493,6 @@ int main(){
     sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0644, 1);
 
     signal(SIGINT, sigint_handler);
-    pthread_t send_thread, recv_thread;
 
     // Shared memory for KTP array (KTP socket structures)
     shmkey = ftok("/", 'A');
