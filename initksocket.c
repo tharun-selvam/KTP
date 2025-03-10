@@ -63,7 +63,9 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, int rwnd_size) {
     char mssg_chk[MSSG_SIZE+1];
     extract_pkt(ack_packet, &header_chk, mssg_chk);
     
+    #ifdef DEBUG
     printf("Checking ACK:\n\t\tAck Num: %d\n\t\twin size: %d\n", ack_num, rwnd_size);
+    #endif
 
     
     // Prepare destination address
@@ -76,8 +78,10 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, int rwnd_size) {
     // Send ACK
     sendto(sock_fd, ack_packet, PACKET_SIZE, 0, 
            (struct sockaddr*)&dest_addr, sizeof(dest_addr));
-
+           
+    #ifdef DEBUG
     printf("--- Ack successfully sent \n");
+    #endif
     
     free(ack_packet);
 }
@@ -267,7 +271,10 @@ void *R(void* arg) {
                         
                     }
                     
+                    
+                    #ifdef DEBUG
                     print_swnd(&ktp_arr[i].swnd, &ktp_arr[i].send_buf);
+                    #endif
                     
                 } else {
                     // Data message handling
@@ -421,11 +428,16 @@ void *S(void *arg) {
 
                 }
 
-                if(flag)
+                if(flag){
+
+                    #ifdef DEBUG
                     print_swnd(&sock->swnd, &sock->send_buf);
+                    #endif
+                }
 
-
+                #ifdef DEBUG
                 printf("\n\n");
+                #endif
             }
         }
     }
