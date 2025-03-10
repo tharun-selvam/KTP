@@ -469,10 +469,12 @@ int k_close(int socket){
     // SHM access
     struct ktp_sockaddr* ktp_arr = open_ktp_arr();
 
-
+    init_semaphore(sem);
+    sem_wait(sem);
     initialise_shm_ele(&ktp_arr[socket]);
-
+    
     ktp_arr[socket].close_status = AWAIT_CLOSE;
+    sem_post(sem);
 
     shmdt(ktp_arr);
     return 0;

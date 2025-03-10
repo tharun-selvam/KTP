@@ -26,6 +26,7 @@
 #define MAX_CONC_SOSCKETS 10
 
 #define T 5
+#define WAIT_BEFORE_TERMINATION 12
 
 typedef enum {
     CUSTOM_ERROR_NONE = 0,
