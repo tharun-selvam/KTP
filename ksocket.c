@@ -28,14 +28,12 @@ int enqueue(struct data_buffer *ca, char* mssg) {
     if (isFull(ca)) {
         return 0;
     }
-    printf("Before enque\n\t\thead: %d\n\t\ttail: %d\n\t\tsize: %d\n", ca->head, ca->tail, ca->count);
     
     strncpy(ca->_buf[ca->tail], mssg, MSSG_SIZE);
     ca->_buf[ca->tail][MSSG_SIZE] = '\0';
 
     ca->tail = (ca->tail + 1) % BUFFER_SIZE;
     ca->count++;
-    printf("After enque\n\t\thead: %d\n\t\ttail: %d\n\t\tsize: %d\n", ca->head, ca->tail, ca->count);
 
     return 1;
 }
@@ -215,7 +213,6 @@ char* pkt_create(struct ktp_header header, char* mssg){
     memcpy(packet, &header, sizeof(header));
     memcpy(packet + sizeof(header), mssg, mssglen);
 
-    printf("Packet inside: |%s|\n", packet + sizeof(header));
 
     return packet;
 }
@@ -232,7 +229,7 @@ void print_header(struct ktp_header *header){
     printf("\tIs Ack: %d\n", header->is_ack);
     printf("\tAck Num: %d\n", header->ack_num);
     printf("\tSeq Num: %d\n", header->seq_num);
-    printf("\trwnd size: %d\n", header->rwnd_size);
+    printf("\trwnd size: %d\n\n", header->rwnd_size);
 
     return;
 }
@@ -505,7 +502,7 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
     // pkt not in window range
     if(recvd_pkt_num < lower_limit || recvd_pkt_num > upper_limit){
         // send last ackd packet again with the same rwnd window size
-        return -1;
+        return rwnd->free_space;
     }
 
     // nexte_expected pkt has arrived
@@ -517,9 +514,11 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
         if ( enqueue(&sock->recv_buf, mssg) < 0){
             
             setCustomError(RECV_BUFF_FULL);
-            return -1;
+            return rwnd->free_space;
 
         }
+
+        // rwnd->free_space++;
 
         // unnecessary because lower_limit will always be in range [1, MAX_SEQ_NUM]
         if(recvd_pkt_num > MAX_SEQ_NUM) recvd_pkt_num = recvd_pkt_num % MAX_SEQ_NUM;
@@ -546,14 +545,13 @@ int update_rwnd(struct rwnd * rwnd, int recvd_pkt_num, char *mssg, struct ktp_so
         rwnd->last_ack_sent = (tmp == 1) ? MAX_SEQ_NUM : (tmp - 1);
 
     }
-    else if (rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] == 0){
-        // out of order but within window pkt has arrived
-    
+    else if (rwnd->seq_nums_map[((recvd_pkt_num - 1) % MAX_SEQ_NUM) + 1] == 0) {
+        int idx = ((recvd_pkt_num - 1) % MAX_SEQ_NUM) + 1;
+        // out of order but within window packet has arrived
         // update seq_nums_map and stash it in the buffer
-
-        rwnd->seq_nums_map[recvd_pkt_num % MAX_SEQ_NUM] = 1;
-        strncpy(rwnd->stash_buffer[recvd_pkt_num % MAX_SEQ_NUM], mssg, MSSG_SIZE);
-        rwnd->stash_buffer[recvd_pkt_num % MAX_SEQ_NUM][MSSG_SIZE] = '\0';
+        rwnd->seq_nums_map[idx] = 1;
+        strncpy(rwnd->stash_buffer[idx], mssg, MSSG_SIZE);
+        rwnd->stash_buffer[idx][MSSG_SIZE] = '\0';
         rwnd->free_space--;
     }
 
@@ -592,9 +590,9 @@ void print_swnd(struct swnd *sw, struct data_buffer *buf) {
     // Since WINDOW_SIZE is the size of the send_times array, loop through each element.
     for (int i = 0; i < WINDOW_SIZE; i++) {
         printf("Packet %d: %ld sec, %ld usec\n", 
-               i, 
-               (long)sw->send_times[i].tv_sec, 
-               (long)sw->send_times[i].tv_usec);
+               i+1, 
+               (long)sw->send_times[i+1].tv_sec, 
+               (long)sw->send_times[i+1].tv_usec);
     }
     
     printf("\nAvailable Receiver Window: %d\n", sw->available_rwnd);

@@ -33,7 +33,6 @@ sem_t *sem;
 
 int dropMessage(float p) {
     float random = (float)rand() / RAND_MAX;
-    printf("--- --- --- Packet droped --- --- ---\n");
     return random < p;
 }
 
@@ -61,9 +60,8 @@ void send_ack(int sock_fd, struct ktp_sockaddr *sock, int rwnd_size) {
     char mssg_chk[MSSG_SIZE+1];
     extract_pkt(ack_packet, &header_chk, mssg_chk);
     
-    printf("Checking ACK:\n\t\tMessage:|%s|\n", mssg_chk);
+    printf("Checking ACK:\n\t\tAck Num: %d\n\t\twin size: %d\n", ack_num, rwnd_size);
 
-    printf("Ack message of size %lu prepared\n", sizeof(ack_packet));
     
     // Prepare destination address
     struct sockaddr_in dest_addr;
@@ -112,15 +110,13 @@ void *R(void* arg) {
         int ready = select(maxfd + 1, &read_fds, NULL, NULL, &timeout);
         
         if (ready > 0) {
-            printf("--- select received something!\n");
-            
             for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
                 
                 if(ktp_arr[i].process_id < 0) continue;
                 if (ktp_arr[i].udp_fd < 0 || !FD_ISSET(ktp_arr[i].udp_fd, &read_fds))
                 continue;
                 
-                printf("------ select received something on %d!\n", ktp_arr[i].process_id);
+                // printf("------ select received something on %d!\n", ktp_arr[i].process_id);
                 
                 // Receive the packet
                 char packet[PACKET_SIZE];
@@ -129,7 +125,6 @@ void *R(void* arg) {
                 
                 ssize_t received = recvfrom(ktp_arr[i].udp_fd, packet, sizeof(packet), 0,
                 (struct sockaddr*)&sender_addr, &addr_len);
-                printf("Packet, Received: %d |%s|\n", (int)received, packet);
                 if (received <= 0)
                 {
                     printf("PID: %d Nothing received\n", ktp_arr[i].process_id);
@@ -138,6 +133,16 @@ void *R(void* arg) {
                 
                 // Simulate packet loss
                 if (dropMessage(P1)) {
+                    // Extract header and message
+                    printf("--- --- --- Packet droped --- --- ---\n");
+
+                    struct ktp_header pkt_header;
+                    char message[MSSG_SIZE + 1];
+                    extract_pkt(packet, &pkt_header, message);
+
+                    print_header(&pkt_header);
+                    printf("--- --- --- Packet droped --- --- ---\n");
+
                     continue; // Drop packet
                 }
                 
@@ -155,7 +160,6 @@ void *R(void* arg) {
                     // We assume swnd.base holds the sequence number of the packet currently in flight.
                     if (pkt_header.ack_num == ktp_arr[i].swnd.next_seq_num) {
                         
-                        printf("hereAck\n");
                         sem_wait(sem);
                         // Valid in-order ACK received:
                         // Update next sequence number: if ack is MAX_SEQ_NUM then next becomes 1.
@@ -191,12 +195,12 @@ void *R(void* arg) {
                         int flag = 0;
                         if (base <= upper_limit) {
                             // No wrap-around: valid ACK must be > base and <= upper_limit.
-                            if (pkt_header.ack_num > base && pkt_header.ack_num <= upper_limit) {
+                            if (pkt_header.ack_num >= base && pkt_header.ack_num <= upper_limit) {
                                 flag = 1;
                             }
                         } else {
                             // Wrap-around case: valid ACK is either greater than base or less than or equal to upper_limit.
-                            if (pkt_header.ack_num > base || pkt_header.ack_num <= upper_limit) {
+                            if (pkt_header.ack_num >= base || pkt_header.ack_num <= upper_limit) {
                                 // Process duplicate or out-of-order ACK here.
                                 flag = 1;
                             }
@@ -212,7 +216,7 @@ void *R(void* arg) {
                             while(1){
                                 sock->swnd.send_times[tmp].tv_sec = 0;
                                 sock->swnd.send_times[tmp].tv_usec = 0;
-                                sock->swnd.sent_seq_nums[tmp] = 0;
+                                sock->swnd.sent_seq_nums[tmp] = 1;
                                 dequeue(&ktp_arr[i].send_buf, NULL);
                                 
                                 if(tmp == pkt_header.ack_num){
@@ -224,8 +228,8 @@ void *R(void* arg) {
                             }
                             sem_post(sem);
 
-                            ktp_arr[i].swnd.window_size = min(sizeOfCircularArray(&ktp_arr[i].send_buf), ktp_arr[i].swnd.available_rwnd);
                             ktp_arr[i].swnd.available_rwnd = pkt_header.rwnd_size;
+                            ktp_arr[i].swnd.window_size = min(sizeOfCircularArray(&ktp_arr[i].send_buf), ktp_arr[i].swnd.available_rwnd);
 
                             ktp_arr[i].rwnd.last_ack_sent = pkt_header.ack_num;
                         }
@@ -236,34 +240,11 @@ void *R(void* arg) {
                     
                 } else {
                     // Data message handling
-                    // Accept the packet only if its sequence number matches the expected sequence.
-                    // if (pkt_header.seq_num == ktp_arr[i].rwnd.next_expected_seq) {
-                    //     // Enqueue the message in the receiver buffer.
-                    //     printf("hereNewMssgRecv\n");
-                    //     sem_wait(sem);
-                    //     if (enqueue(&ktp_arr[i].recv_buf, message)) {
-                    //         // Send ACK for this packet.
-                    //         send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], pkt_header.seq_num);
-                    //         // Update expected sequence number (wrap from MAX_SEQ_NUM to 1)
-                    //         ktp_arr[i].rwnd.next_expected_seq = (pkt_header.seq_num % MAX_SEQ_NUM) + 1;
-                    //     }
-                    //     sem_post(sem);
-                    // } else {
-                    //     // Out-of-order data packet: drop it.
-                    //     // send an ACK for the last in-order packet,
-                    //     printf("hereAck\n");
-                    //     sem_wait(sem);
-                    //     uint8_t last_in_order;
-                    //     if (ktp_arr[i].rwnd.next_expected_seq == 1)
-                    //         last_in_order = MAX_SEQ_NUM;
-                    //     else
-                    //         last_in_order = ktp_arr[i].rwnd.next_expected_seq - 1;
-                    //     send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], last_in_order);
-                    //     sem_post(sem);
-                    // }
                     sem_wait(sem);
                     int free_space = update_rwnd(&ktp_arr[i].rwnd, pkt_header.seq_num, message, &ktp_arr[i]);
                     sem_post(sem);
+
+                    printf("---Data Message---\n\tRecv buf size: %d, free spze: %d\n", sizeOfCircularArray(&ktp_arr[i].recv_buf), free_space);
 
                     if(free_space != -1)
                         send_ack(ktp_arr[i].udp_fd, &ktp_arr[i], free_space);
@@ -361,59 +342,7 @@ void *S(void *arg) {
 
             // Case 2: No outstanding packet. Check if there is a pending message.
             if(1) {
-                // if (!isEmpty(&sock->send_buf) && sock->swnd.window_size > 0) {
-                //     // Print the buffer
-                //     print_buff(&sock->send_buf);
-
-                //     // Peek at the first pending message in the send buffer.
-                //     char *message = sock->send_buf._buf[sock->send_buf.head];
-                    
-                //     // int x = sock->send_buf.head;
-                //     // if(x == 2)
-                //     //     message = sock->send_buf._buf[sock->send_buf.head-1];
-                    
-                //     // Build packet using the current next sequence number.
-                //     struct ktp_header header;
-                //     header.seq_num = sock->swnd.next_seq_num;
-                //     header.is_ack = 0;
-                //     header.rwnd_size = WINDOW_SIZE - sock->recv_buf.count;
-                    
-                //     char *pkt = pkt_create(header, message);
-                    
-                //     // Prepare destination address.
-                //     struct sockaddr_in dest_addr;
-                //     memset(&dest_addr, 0, sizeof(dest_addr));
-                //     dest_addr.sin_family = AF_INET;
-                //     printf("Des. Port: %d Des. IP: %s\n", sock->des_port, sock->des_ip);
-                //     dest_addr.sin_port = htons(sock->des_port);
-                //     inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
-                    
-                //     printf("here1\n");
-                //     printf("Message sent: |%s|\n", message);
-                //     // Send the packet.
-                //     if(sendto(sock->udp_fd, pkt, PACKET_SIZE, 0,
-                //            (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0 ){
-
-                //         printf("%d %s\n", ktp_arr[i].udp_fd, strerror(errno));
-
-                //     }
-                //     printf("Packet of size %d sent\n", sizeof(pkt));
-
-                //     // Update window size
-                //     sock->swnd.window_size--;
-
-                //     // Mark this packet as outstanding.
-                //     sock->swnd.base = header.seq_num;
-                //     // Update next sequence number with wrap-around (1-MAX_SEQ_NUM).
-                //     sock->swnd.next_seq_num = (header.seq_num % MAX_SEQ_NUM) + 1;
-                    
-                //     // Record the send time.
-                    // gettimeofday(&sock->last_send_time, NULL);
-                    
-                //     free(pkt);
-                // }
-
-
+               
                 struct ktp_sockaddr * sock = &ktp_arr[i];
                 
                 // extract 'limit' number of messages to send from send_buf
@@ -429,8 +358,9 @@ void *S(void *arg) {
                 inet_pton(AF_INET, sock->des_ip, &dest_addr.sin_addr);
                 
                 if(sock->swnd.window_size > 0)
-                printf("Sending %d messages to Des. Port: %d Des. IP: %s\n", sock->swnd.window_size, sock->des_port, sock->des_ip);
+                printf("Attempting to send %d messages to Des. Port: %d Des. IP: %s\n", sock->swnd.window_size, sock->des_port, sock->des_ip);
                 
+                int flag = 0;
                 for(int i=0; i<sock->swnd.window_size; i++){
                     // Build packet using the current next sequence number.
                     struct ktp_header header;
@@ -449,6 +379,7 @@ void *S(void *arg) {
                         printf("%d %s\n", ktp_arr[i].udp_fd, strerror(errno));
 
                     }else {
+                        flag = 1;
                         printf("\tSent seq_num: %d\n", header.seq_num);
                     }
 
@@ -458,6 +389,10 @@ void *S(void *arg) {
                     gettimeofday(&sock->swnd.send_times[header.seq_num], NULL);
 
                 }
+
+                if(flag)
+                    print_swnd(&sock->swnd, &sock->send_buf);
+
 
                 printf("\n\n");
             }
@@ -490,9 +425,7 @@ void custom_exit(int status){
 void intialise_array(){
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
         
-        printf("here2\n");
         sem_wait(sem);
-        printf("here3\n");
         initialise_shm_ele(&ktp_arr[i]);
         sem_post(sem);
 
@@ -508,7 +441,6 @@ void sigint_handler(int signum) {
 void set_udp_sock_fds(){
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
 
-        printf("hereUdp\n");
         sem_wait(sem);
         udp_sock_fds[i] = socket(AF_INET, SOCK_DGRAM, 0);
         sem_post(sem);
@@ -519,7 +451,6 @@ void set_udp_sock_fds(){
 int main(){
 
     // create semaphore to access the shared mem of different processese
-    printf("here\n");
     sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0644, 1);
 
     signal(SIGINT, sigint_handler);

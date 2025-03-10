@@ -14,7 +14,7 @@
 #define SOCK_KTP 12345
 #define HEADER_SIZE 4
 #define PACKET_SIZE (MSSG_SIZE+HEADER_SIZE)
-#define MAX_SEQ_NUM 25
+#define MAX_SEQ_NUM 255
 
 /* Macros for bind_status used in ktp_arr */
 #define UNBINDED -1
