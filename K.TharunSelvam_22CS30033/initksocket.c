@@ -205,34 +205,6 @@ void *R(void* arg) {
                                 flag = 1;
                             }
                         }
-
-                        if(ktp_arr[i].swnd.sent_seq_nums[pkt_header.ack_num] == 0 && flag != 1){
-                            // printf("!!!!!!!!!!!!!!! ERR !!!!!!!!!!!!!!!\n");
-                            struct ktp_sockaddr* sock = &ktp_arr[i];
-
-                            int tmp = ktp_arr[i].swnd.next_seq_num;
-
-                            sem_wait(sem);
-                            while(1){
-                                sock->swnd.send_times[tmp].tv_sec = 0;
-                                sock->swnd.send_times[tmp].tv_usec = 0;
-                                sock->swnd.sent_seq_nums[tmp] = 1;
-                                dequeue(&ktp_arr[i].send_buf, NULL);
-                                
-                                if(tmp == pkt_header.ack_num){
-                                    sock->swnd.next_seq_num = (tmp )% MAX_SEQ_NUM + 1;
-                                    break;
-                                }
-
-                                tmp = (tmp )% MAX_SEQ_NUM + 1;
-                            }
-
-                            ktp_arr[i].swnd.available_rwnd = pkt_header.rwnd_size;
-                            ktp_arr[i].swnd.window_size = min(sizeOfCircularArray(&ktp_arr[i].send_buf), ktp_arr[i].swnd.available_rwnd);
-                            
-                            ktp_arr[i].rwnd.last_ack_sent = pkt_header.ack_num;
-                            sem_post(sem);
-                        }
                         
                         if(flag == 1){
                             // Out of order ACK signifies that all packets upto that number were recvd
@@ -254,12 +226,12 @@ void *R(void* arg) {
 
                                 tmp = (tmp )% MAX_SEQ_NUM + 1;
                             }
-                            
+                            sem_post(sem);
+
                             ktp_arr[i].swnd.available_rwnd = pkt_header.rwnd_size;
                             ktp_arr[i].swnd.window_size = min(sizeOfCircularArray(&ktp_arr[i].send_buf), ktp_arr[i].swnd.available_rwnd);
-                            
+
                             ktp_arr[i].rwnd.last_ack_sent = pkt_header.ack_num;
-                            sem_post(sem);
                         }
                         
                     }
