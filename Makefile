@@ -3,6 +3,11 @@ CFLAGS = -Wall -g
 AR = ar
 ARFLAGS = rcs
 
+# If DEBUG is set to 1, add -DDEBUG to CFLAGS.
+ifeq ($(DEBUG),1)
+    CFLAGS += -DDEBUG
+endif
+
 LIB = libksocket.a
 OBJS = ksocket.o
 
@@ -28,35 +33,35 @@ user1: user1.c ksocket.h $(LIB)
 user2: user2.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o user2 user2.c $(LIB)
 
-# Build user2 executable.
+# Build user3 executable.
 user3: user3.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o user3 user3.c $(LIB)
 
-# Build user2 executable.
+# Build user4 executable.
 user4: user4.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o user4 user4.c $(LIB)
 
-# Build user2 executable.
+# Build user5 executable.
 user5: user5.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o user5 user5.c $(LIB)
 
-# Build user2 executable.
+# Build user6 executable.
 user6: user6.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o user6 user6.c $(LIB)
 
-# Build user2 executable.
+# Build usera executable.
 usera: usera.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o usera usera.c $(LIB)
 
-# Build user2 executable.
+# Build userb executable.
 userb: userb.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o userb userb.c $(LIB)
 
-# Build user2 executable.
+# Build test1 executable.
 test1: test1.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o test1 test1.c $(LIB)
 
-# Build user2 executable.
+# Build test2 executable.
 test2: test2.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o test2 test2.c $(LIB)
 
