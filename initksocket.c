@@ -29,7 +29,7 @@ sem_t *sem;
 #define P(s) semop(s, &pop, 1)
 #define V(s) semop(s, &vop, 1)
 
-#define P1 0.2  // Packet drop probability
+#define P1 0.5  // Packet drop probability
 
 int dropMessage(float p) {
     float random = (float)rand() / RAND_MAX;
@@ -137,9 +137,9 @@ void *R(void* arg) {
                 }
                 
                 // Simulate packet loss
-                // if (dropMessage(P1)) {
-                //     continue; // Drop packet
-                // }
+                if (dropMessage(P1)) {
+                    continue; // Drop packet
+                }
                 
                 // Extract header and message
                 struct ktp_header pkt_header;
@@ -295,7 +295,7 @@ void *S(void *arg) {
         
         // For each active KTP socket
         for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
-            if (ktp_arr[i].udp_fd < 0)
+            if (ktp_arr[i].udp_fd < 0 || ktp_arr[i].bind_status != BINDED)
                 continue;
             
             struct ktp_sockaddr *sock = &ktp_arr[i];
@@ -635,6 +635,7 @@ int main(){
             }
 
             // check if the process has died without calling k_close
+            // garbage collection
             if (kill(ktp_arr[i].process_id, 0) == -1 && errno == ESRCH) {
                 sem_wait(sem);
                 k_close(i);

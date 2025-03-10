@@ -6,7 +6,7 @@ ARFLAGS = rcs
 LIB = libksocket.a
 OBJS = ksocket.o
 
-all: initprocess user1 user2 user3 user4 user5 user6 usera userb
+all: initprocess user1 user2 user3 user4 user5 user6 usera userb test1 test2
 
 # Compile ksocket.c into an object file.
 ksocket.o: ksocket.c ksocket.h
@@ -52,7 +52,15 @@ usera: usera.c ksocket.h $(LIB)
 userb: userb.c ksocket.h $(LIB)
 	$(CC) $(CFLAGS) -o userb userb.c $(LIB)
 
+# Build user2 executable.
+test1: test1.c ksocket.h $(LIB)
+	$(CC) $(CFLAGS) -o test1 test1.c $(LIB)
+
+# Build user2 executable.
+test2: test2.c ksocket.h $(LIB)
+	$(CC) $(CFLAGS) -o test2 test2.c $(LIB)
+
 # Clean up generated files.
 clean:
-	rm -f *.o $(LIB) initprocess user1 user2 user3 user4 user5 user6 usera userb
+	rm -f *.o $(LIB) initprocess user1 user2 user3 user4 user5 user6 usera userb test1 test2
 	rm -rf *.dSYM

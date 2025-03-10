@@ -5,19 +5,18 @@
 #include <arpa/inet.h>
 #include "ksocket.h"
 
-#define NUM 10
+#define NUM 30
 
 int main() {
     int sock = k_socket(AF_INET, SOCK_KTP, 0);
     if (sock < 0) {
-        printf("Error creating KTP socket\n");
-        printf("%s", getCustomErrorMessage(global_err_var));
+        printf("Error creating KTP socket\n%s", getCustomErrorMessage(global_err_var));
         exit(1);
     }
     
     // Bind the KTP socket: local IP 127.0.0.1:5000, remote IP 127.0.0.1:6000
     if (k_bind(sock, "127.0.0.1", 5000, "127.0.0.1", 6000) < 0) {
-        printf("Error binding KTP socket\n");
+        printf("Error binding KTP socket: %s\n", getCustomErrorMessage(global_err_var));
         exit(1);
     }
     
@@ -28,61 +27,40 @@ int main() {
     dest_addr.sin_port = htons(6000);
     inet_pton(AF_INET, "127.0.0.1", &dest_addr.sin_addr);
     
-    // Three messages to send
-    char *messages[NUM] = {
-        "Message 1: Hello from User1",
-        "Message 2: How are you?",
-        "Message 3: Goodbye!",
-        "Message 4: Hope you're doing well.",
-        "Message 5: Just checking in.",
-        "Message 6: What's up?",
-        "Message 7: Call me when you can.",
-        "Message 8: I'll be waiting.",
-        "Message 9: See you at the meeting.",
-        "Message 10: Keep in touch."
-    };
+    // Array of 16 messages
+    char *messages[NUM];
+    for (int i = 0; i < NUM; i++) {
+        char temp[100];
+        sprintf(temp, "Message %d: Extra message %d", i + 1, i + 1);
+        messages[i] = strdup(temp);
+    }
     
-    
+    // Print the initial state of the send buffer.
     application_print(sock);
     
+    // Send each message one by one
     for (int i = 0; i < NUM; i++) {
         int sent = k_sendto(sock, messages[i], strlen(messages[i]) + 1, 0,
                              (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        if (sent < 0) {
-            printf("Error sending message %d\n", i + 1);
-            printf("Error:\t%s\n", getCustomErrorMessage(global_err_var));
-        } else {
-            printf("Sent: %s\n", messages[i]);
-            // application_print(sock);
-
+        int attempt = 1;
+        // If k_sendto returns -1, wait until the send buffer clears and retry.
+        while (sent < 0) {
+            printf("Error sending message %d: %s. Attempt %d: Waiting for send buffer to clear...\n",
+                   i + 1, getCustomErrorMessage(global_err_var), attempt);
+            sleep(1);
+            attempt++;
+            sent = k_sendto(sock, messages[i], strlen(messages[i]) + 1, 0,
+                             (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         }
-        // Wait a bit to allow the ACK and transmission logic to complete
-
-        if(i == NUM-1){
-            char c;
-            break;
-        }
+        printf("Sent message %d: %s\n", i + 1, messages[i]);
     }
     
+    // Wait a bit to allow ACK and transmission logic to complete.
     sleep(3);
-    for (int i = 0; i < NUM; i++) {
-        int sent = k_sendto(sock, messages[i], strlen(messages[i]) + 1, 0,
-                             (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        if (sent < 0) {
-            printf("Error sending message %d\n", i + 1);
-            printf("Error:\t%s\n", getCustomErrorMessage(global_err_var));
-        } else {
-            printf("Sent: %s\n", messages[i]);
-            // application_print(sock);
-
-        }
-        // Wait a bit to allow the ACK and transmission logic to complete
-
-        if(i == NUM-1){
-            char c;
-            scanf(" %c", &c);
-        }
-    }
+    
+    char c;
+    printf("Press any key to exit...\n");
+    scanf(" %c", &c);
     
     k_close(sock);
     return 0;

@@ -8,13 +8,13 @@
 #include <semaphore.h>
 
 
-#define WINDOW_SIZE 3
+#define WINDOW_SIZE 10
 #define BUFFER_SIZE 10
 #define MSSG_SIZE 512
 #define SOCK_KTP 12345
 #define HEADER_SIZE 4
 #define PACKET_SIZE (MSSG_SIZE+HEADER_SIZE)
-#define MAX_SEQ_NUM 8
+#define MAX_SEQ_NUM 25
 
 /* Macros for bind_status used in ktp_arr */
 #define UNBINDED -1

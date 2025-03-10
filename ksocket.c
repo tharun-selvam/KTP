@@ -418,7 +418,6 @@ int k_sendto(int socket, const void *buffer, size_t length, int flags, const str
 void initialise_shm_ele(struct ktp_sockaddr* ele){
     ele->udp_fd = -1;
 
-    printf("here1\n");
     ele->process_id = -1;
     ele->udp_fd = -1;
     
