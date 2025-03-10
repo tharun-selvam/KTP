@@ -470,7 +470,8 @@ void *S(void *arg) {
 void custom_exit(int status){
 
     for(int i=0; i<MAX_CONC_SOSCKETS; i++){
-    
+        
+        printf("%d ", i);
         close(udp_sock_fds[i]);
 
     }
@@ -596,17 +597,11 @@ int main(){
 
         for(int i=0; i<MAX_CONC_SOSCKETS; i++){
             
-            
-            if(ktp_arr[i].process_id < 0){
-                continue;
-            }
-
-            
             // check if the process has called for an outstanding bind
             struct ktp_sockaddr* sock = &ktp_arr[i];
             
             
-            if(ktp_arr[i].bind_status == AWAIT_BIND){
+            if(ktp_arr[i].process_id> 0 && ktp_arr[i].bind_status == AWAIT_BIND){
                 
                 struct sockaddr_in servaddr;
                 memset(&servaddr, 0, sizeof(servaddr));
@@ -643,6 +638,15 @@ int main(){
             if (kill(ktp_arr[i].process_id, 0) == -1 && errno == ESRCH) {
                 sem_wait(sem);
                 k_close(i);
+                sem_post(sem);
+            }
+
+            // close sockets that have called k_close
+            if(sock->close_status == AWAIT_CLOSE){
+                close(udp_sock_fds[i]);
+                sem_wait(sem);
+                udp_sock_fds[i] = socket(AF_INET, SOCK_DGRAM, 0);
+                sock->close_status = OPEN;
                 sem_post(sem);
             }
 

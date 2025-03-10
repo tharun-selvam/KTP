@@ -20,6 +20,8 @@
 #define UNBINDED -1
 #define AWAIT_BIND -2
 #define BINDED -3
+#define OPEN -4
+#define AWAIT_CLOSE -5
 
 #define MAX_CONC_SOSCKETS 10
 
@@ -123,6 +125,7 @@ struct ktp_sockaddr{
     int nospace_flag;
 
     int bind_status;
+    int close_status;
 };
 
 #pragma pack(1)

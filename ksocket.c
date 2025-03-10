@@ -434,6 +434,7 @@ void initialise_shm_ele(struct ktp_sockaddr* ele){
 
     // ele->next_expected_seq = -1;
     ele->bind_status = UNBINDED;
+    ele->close_status = OPEN;
 }
 
 int k_recvfrom(int socket, void *restrict buffer, size_t length, int flags, struct sockaddr *restrict address, socklen_t *restrict address_len){
@@ -474,6 +475,8 @@ int k_close(int socket){
 
 
     initialise_shm_ele(&ktp_arr[socket]);
+
+    ktp_arr[socket].close_status = AWAIT_CLOSE;
 
     shmdt(ktp_arr);
     return 0;
