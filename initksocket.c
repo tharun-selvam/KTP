@@ -94,7 +94,7 @@ void *R(void* arg) {
         // Set up select() for all active UDP sockets
         for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
             
-            if (ktp_arr[i].udp_fd < 0)
+            if (ktp_arr[i].process_id < 0)
                 continue;
             FD_SET(ktp_arr[i].udp_fd, &read_fds);
             if (ktp_arr[i].udp_fd > maxfd)
@@ -116,11 +116,11 @@ void *R(void* arg) {
             
             for (int i = 0; i < MAX_CONC_SOSCKETS; i++) {
                 
-                
+                if(ktp_arr[i].process_id < 0) continue;
                 if (ktp_arr[i].udp_fd < 0 || !FD_ISSET(ktp_arr[i].udp_fd, &read_fds))
                 continue;
                 
-                printf("------ select received something!\n");
+                printf("------ select received something on %d!\n", ktp_arr[i].process_id);
                 
                 // Receive the packet
                 char packet[PACKET_SIZE];
@@ -305,7 +305,6 @@ void *S(void *arg) {
             // Retransmission for outstanding packets in the valid window range.
             if(1){
                 struct ktp_sockaddr *sock = &ktp_arr[i];
-                sem_wait(sem);
                 struct timeval current_time;
                 gettimeofday(&current_time, NULL);
 
@@ -358,7 +357,6 @@ void *S(void *arg) {
                         }
                     }
                 }
-                sem_post(sem);
             }
 
             // Case 2: No outstanding packet. Check if there is a pending message.
@@ -450,6 +448,8 @@ void *S(void *arg) {
 
                         printf("%d %s\n", ktp_arr[i].udp_fd, strerror(errno));
 
+                    }else {
+                        printf("\tSent seq_num: %d\n", header.seq_num);
                     }
 
                     // update swnd to keep track of outstanding pkts
@@ -458,6 +458,8 @@ void *S(void *arg) {
                     gettimeofday(&sock->swnd.send_times[header.seq_num], NULL);
 
                 }
+
+                printf("\n\n");
             }
         }
     }
@@ -598,9 +600,11 @@ int main(){
             if(ktp_arr[i].process_id < 0){
                 continue;
             }
+
             
             // check if the process has called for an outstanding bind
             struct ktp_sockaddr* sock = &ktp_arr[i];
+            
             
             if(ktp_arr[i].bind_status == AWAIT_BIND){
                 
@@ -612,9 +616,23 @@ int main(){
                 
                 if(bind(sock->udp_fd, (struct sockaddr*)&servaddr, sizeof(servaddr))){
                     setCustomError(EBIND);
-                }
+                    printf("Error binding %d\n", sock->process_id);
+                    printf("bind error: %s\n", strerror(errno));
+                    printf("Binding with family=%d, port=%d, addr=%s, socket=%d\n",
+                        servaddr.sin_family,
+                        ntohs(servaddr.sin_port),
+                        inet_ntoa(servaddr.sin_addr),
+                        sock->udp_fd);
+                        
+                    }
                 else{
+                    printf("Binding with family=%d, port=%d, addr=%s, socket=%d\n",
+                        servaddr.sin_family,
+                        ntohs(servaddr.sin_port),
+                        inet_ntoa(servaddr.sin_addr),
+                        sock->udp_fd);
                     sem_wait(sem);
+                    if(sock->process_id)
                     ktp_arr[i].bind_status = BINDED;
                     sem_post(sem);
                     printf("Process %d binded\n", ktp_arr[i].process_id);
