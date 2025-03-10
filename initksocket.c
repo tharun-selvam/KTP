@@ -625,7 +625,7 @@ int main(){
             if (kill(ktp_arr[i].process_id, 0) == -1 && errno == ESRCH) {
                 sem_wait(sem);
                 k_close(i);
-                sem_close(sem);
+                sem_post(sem);
             }
 
         }
